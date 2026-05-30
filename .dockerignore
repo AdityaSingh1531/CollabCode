@@ -1,0 +1,11 @@
+# Don't send these to Docker / Cloud Build context
+.git
+.next
+node_modules
+.env
+.env.*
+!.env.example
+*.md
+screen.png
+.gitignore
+.vercel

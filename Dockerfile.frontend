@@ -1,0 +1,51 @@
+# =============================================================================
+# CollabCode Frontend — Multi-Stage Production Dockerfile
+# =============================================================================
+# Stage 1: deps    — install node_modules
+# Stage 2: builder — compile TypeScript & build Next.js standalone output
+# Stage 3: runner  — minimal image with only the standalone bundle
+# =============================================================================
+
+# ── Stage 1: Install dependencies ───────────────────────────────────────────
+FROM node:20-alpine AS deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+# ── Stage 2: Build the Next.js app ──────────────────────────────────────────
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+# Copy node_modules from deps stage
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Build with standalone output (set in next.config.ts)
+RUN npm run build
+
+# ── Stage 3: Minimal production runner ──────────────────────────────────────
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+# Cloud Run injects PORT; Next.js standalone server reads it automatically
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+# Create non-root user
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+# Copy only what the standalone server needs
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+
+EXPOSE 3000
+
+# Next.js standalone produces server.js at the root
+CMD ["node", "server.js"]

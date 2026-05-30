@@ -1,35 +1,35 @@
-# Use ultra-lightweight Alpine Linux as the base
-FROM alpine:3.18
+# =============================================================================
+# CollabCode Cloud Executor — Production Dockerfile
+# =============================================================================
+# Base: Python 3.11 slim (Debian-based, smaller than Alpine for pip packages)
+# Serves via gunicorn (production WSGI) instead of Flask dev server
+# =============================================================================
 
-# Install minimal runtimes for Python, C/C++, and JavaScript (Node)
-# Also install py3-pip and flask for the HTTP execution server
-RUN apk add --no-cache \
-    python3 \
-    py3-pip \
-    gcc \
-    g++ \
-    libc-dev \
-    nodejs \
-    bash
+FROM python:3.11-slim
 
-# Install Flask (the lightweight HTTP server that Cloud Run will talk to)
-RUN pip3 install flask --break-system-packages
+# Install system dependencies for compilation (C/C++ via JDoodle, not local)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create an absolute low-privilege sandbox user
-RUN adduser -D -g "" sandboxuser
+# Create a low-privilege sandbox user
+RUN useradd -m -s /bin/bash sandboxuser
 
-# Set up a secure workspace directory
 WORKDIR /app
 
-# Copy the Flask execution server into the image
+# Copy and install Python dependencies first (layer cache optimisation)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt gunicorn==21.2.0
+
+# Copy the application code
 COPY main.py .
 RUN chown -R sandboxuser:sandboxuser /app
 
-# Switch to the low-privilege user so code can never run as root
+# Switch to low-privilege user
 USER sandboxuser
 
-# Cloud Run requires the container to listen on port 8080
+# Cloud Run listens on PORT env var (default 8080)
 EXPOSE 8080
 
-# Start the Flask HTTP server (replaces the bare bash CMD)
-CMD ["python3", "main.py"]
+# Use gunicorn for production: 2 workers, bind to Cloud Run's $PORT
+CMD exec gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 2 --timeout 30 main:app
