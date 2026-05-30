@@ -43,10 +43,8 @@ export default function CodeCell({ id, initialCode = '', initialLanguage = 'pyth
     setExecutionResult(null);
 
     try {
-      // In production, you might want this to point to a relative /api route or a deployed cloud run url via env var
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080/run';
-      
-      const res = await fetch(backendUrl, {
+      // Fetch via Next.js server-side proxy to avoid client CORS/Failed to fetch errors
+      const res = await fetch('/api/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
