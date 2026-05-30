@@ -17,7 +17,7 @@ export default function TextCell({ id, initialContent = 'Double click to edit te
   // Helper to parse markdown synchronously
   const getParsedMarkdown = () => {
     try {
-      return { __html: marked.parse(content) };
+      return { __html: marked.parseSync(content) as string };
     } catch (e) {
       console.error(e);
       return { __html: content };

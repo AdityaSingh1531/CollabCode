@@ -1,17 +1,21 @@
 import { NextResponse } from 'next/server';
 
-// Map frontend language dropdown tokens → Cloud Run executor language keys
+// Map frontend language dropdown tokens → Cloud Run/Render executor language keys
 const LANGUAGE_MAP: Record<string, string> = {
-  python:     'python',
-  javascript: 'javascript',
-  js:         'javascript',
-  cpp:        'cpp',
-  'c++':      'cpp',
+  python:     'python3',
+  python3:    'python3',
+  javascript: 'nodejs',
+  nodejs:     'nodejs',
+  js:         'nodejs',
+  cpp:        'cpp17',
+  cpp17:      'cpp17',
+  'c++':      'cpp17',
+  java:       'java',
 };
 
 export async function POST(req: Request) {
   try {
-    const { code, language = 'python' } = await req.json();
+    const { code, language = 'python3' } = await req.json();
 
     const cloudRunUrl = process.env.CLOUD_RUN_URL;
     if (!cloudRunUrl) {
@@ -26,7 +30,7 @@ export async function POST(req: Request) {
     }
 
     // Normalize the language token from the frontend dropdown
-    const normalizedLanguage = LANGUAGE_MAP[language.toLowerCase()] ?? 'python';
+    const normalizedLanguage = LANGUAGE_MAP[language.toLowerCase()] ?? 'python3';
 
     // Server-side timeout: 8s gives the Cloud Run container's 3s subprocess
     // kill plenty of room plus cold-start overhead, while still failing fast.
