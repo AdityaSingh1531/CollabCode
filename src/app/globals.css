@@ -1,26 +1,258 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* Hide Next.js Development/Turbopack watermark portal container */
+next-route-announcer,
+[next-route-announcer],
+#__next-build-watcher,
+#shadow-root,
+div[class*="nextjs-toast-errors-parent"],
+#nextjs-portal,
+#nextjs-dev-overlay,
+#webpack-hot-middleware-clientOverlay {
+  display: none !important;
 }
 
-@theme inline {
+/* Turbopack-specific build indicator shadow container hiding rules */
+::part(dev-overlay), 
+next-dev-overlay {
+  display: none !important;
+}
+
+
+@theme {
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-on-background: var(--on-background);
+  --color-surface: var(--surface);
+  --color-surface-dim: var(--surface-dim);
+  --color-surface-bright: var(--surface-bright);
+  --color-surface-container-lowest: var(--surface-container-lowest);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-high: var(--surface-container-high);
+  --color-surface-container-highest: var(--surface-container-highest);
+  --color-on-surface: var(--on-surface);
+  --color-on-surface-variant: var(--on-surface-variant);
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
+  --color-primary: var(--primary);
+  --color-on-primary: var(--on-primary);
+  --color-primary-container: var(--primary-container);
+  --color-secondary: var(--secondary);
+  --color-on-secondary: var(--on-secondary);
+  --color-tertiary: var(--tertiary);
+  --color-error: var(--error);
+  --color-error-container: var(--error-container);
+  --color-on-error-container: var(--on-error-container);
+  --color-secondary-fixed-dim: var(--secondary-fixed-dim);
+
+  --font-ui-header: "Geist", var(--font-geist-sans), sans-serif;
+  --font-ui-body: "Geist", var(--font-geist-sans), sans-serif;
+  --font-ui-label: "Geist", var(--font-geist-sans), sans-serif;
+  --font-code-block: "JetBrains Mono", var(--font-geist-mono), monospace;
+  --font-code-bold: "JetBrains Mono", var(--font-geist-mono), monospace;
+  --font-console-text: "JetBrains Mono", var(--font-geist-mono), monospace;
+
+  --spacing-sidebar-width: 260px;
+  --spacing-panel-height-min: 180px;
+  --spacing-gutter: 1px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  /* Light Mode Colors (Solarized Creme) */
+  --background: #fdf6e3;
+  --on-background: #586e75;
+  --surface: #fdf6e3;
+  --surface-dim: #eee8d5;
+  --surface-bright: #fdf6e3;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #fdf6e3;
+  --surface-container: #eee8d5;
+  --surface-container-high: #e8e2d0;
+  --surface-container-highest: #e0dace;
+  --on-surface: #586e75;
+  --on-surface-variant: #657b83;
+  --outline: #93a1a1;
+  --outline-variant: #ccc8b1;
+  --primary: #268bd2;
+  --on-primary: #ffffff;
+  --primary-container: #dbeafe;
+  --secondary: #2aa198;
+  --on-secondary: #ffffff;
+  --tertiary: #d33682;
+  --error: #dc322f;
+  --error-container: #fee2e2;
+  --on-error-container: #991b1b;
+  --secondary-fixed-dim: #2aa198;
+}
+
+.dark {
+  /* Dark Mode Colors */
+  --background: #0b1326;
+  --on-background: #dae2fd;
+  --surface: #0b1326;
+  --surface-dim: #0b1326;
+  --surface-bright: #31394d;
+  --surface-container-lowest: #060e20;
+  --surface-container-low: #131b2e;
+  --surface-container: #171f33;
+  --surface-container-high: #222a3d;
+  --surface-container-highest: #2d3449;
+  --on-surface: #dae2fd;
+  --on-surface-variant: #c2c6d6;
+  --outline: #8c909f;
+  --outline-variant: #424754;
+  --primary: #adc6ff;
+  --on-primary: #002e6a;
+  --primary-container: #4d8eff;
+  --secondary: #4edea3;
+  --on-secondary: #003824;
+  --tertiary: #ddb7ff;
+  --error: #ffb4ab;
+  --error-container: #93000a;
+  --on-error-container: #ffdad6;
+  --secondary-fixed-dim: #4edea3;
 }
 
 body {
+  background-color: var(--background);
+  color: var(--on-background);
+  font-family: var(--font-ui-body);
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
+}
+
+.code-cursor {
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  from, to { border-color: transparent; }
+  50% { border-color: var(--primary); }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
   background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--surface-container-highest);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--outline-variant);
+}
+
+/* Markdown Rendering Styles */
+.markdown-body {
+  font-family: var(--font-ui-body);
+  color: var(--on-surface-variant);
+}
+.markdown-body h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--outline-variant);
+  padding-bottom: 0.25rem;
+  color: var(--on-surface);
+}
+.markdown-body h2 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  color: var(--on-surface);
+}
+.markdown-body h3 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  color: var(--on-surface);
+}
+.markdown-body p {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  line-height: 1.625;
+}
+.markdown-body strong {
+  font-weight: 700;
+  color: var(--on-surface);
+}
+.markdown-body a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown-body a:hover {
+  color: var(--primary-container);
+}
+.markdown-body ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+}
+.markdown-body ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+}
+.markdown-body li {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+.markdown-body code {
+  font-family: var(--font-code-block);
+  font-size: 0.85em;
+  background-color: var(--surface-container);
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+  color: var(--tertiary);
+}
+.markdown-body pre {
+  background-color: var(--surface-container-low);
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--outline-variant);
+}
+.markdown-body pre code {
+  padding: 0;
+  background-color: transparent;
+  color: inherit;
+  font-size: 0.85rem;
+}
+.markdown-body blockquote {
+  border-left: 4px solid var(--outline);
+  padding-left: 1rem;
+  color: var(--on-surface-variant);
+  font-style: italic;
+  margin: 1rem 0;
+}
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid var(--outline-variant);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.markdown-body th {
+  background-color: var(--surface-container-high);
+  font-weight: 600;
 }
