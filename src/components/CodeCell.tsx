@@ -1,18 +1,26 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Play, Square, Loader2, Trash2, BrainCircuit, CheckCircle2, AlertCircle, Sparkles, Keyboard } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Play, Loader2, Trash2, BrainCircuit, CheckCircle2, AlertCircle, Sparkles, Keyboard, ChevronUp, ChevronDown, Copy, Check } from 'lucide-react';
 
 interface CodeCellProps {
   id: string;
   initialCode?: string;
   initialLanguage?: string;
+  initialStdin?: string;
   onDelete?: () => void;
   onCodeChange?: (code: string) => void;
   onLanguageChange?: (language: string) => void;
   onStdinChange?: (stdin: string) => void;
   onAiHelper?: () => void;
   onExecutionComplete?: (success: boolean) => void;
+  // Reorder
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+  isFirst?: boolean;
+  isLast?: boolean;
+  // Run All trigger — increment to fire run externally
+  runTrigger?: number;
 }
 
 const DEFAULT_CODE: Record<string, string> = {
@@ -22,14 +30,31 @@ const DEFAULT_CODE: Record<string, string> = {
   nodejs: 'console.log("Hello from Node.js!");\nfor (let i = 0; i < 5; i++) {\n    console.log(`Counting: ${i}`);\n}'
 };
 
-export default function CodeCell({ id, initialCode = '', initialLanguage = 'python3', initialStdin = '', onDelete, onCodeChange, onLanguageChange, onStdinChange, onAiHelper, onExecutionComplete }: CodeCellProps) {
+export default function CodeCell({
+  id,
+  initialCode = '',
+  initialLanguage = 'python3',
+  initialStdin = '',
+  onDelete,
+  onCodeChange,
+  onLanguageChange,
+  onStdinChange,
+  onAiHelper,
+  onExecutionComplete,
+  onMoveUp,
+  onMoveDown,
+  isFirst = false,
+  isLast = false,
+  runTrigger = 0,
+}: CodeCellProps) {
   const [language, setLanguage] = useState(initialLanguage);
   const [codeContent, setCodeContent] = useState(initialCode);
-  
   const [isRunning, setIsRunning] = useState(false);
   const [executionResult, setExecutionResult] = useState<any>(null);
   const [isStdinOpen, setIsStdinOpen] = useState(!!initialStdin);
   const [stdinContent, setStdinContent] = useState(initialStdin);
+  const [isCopied, setIsCopied] = useState(false);
+  const [runCount, setRunCount] = useState(0); // [n] execution counter
 
   const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newLang = e.target.value;
@@ -37,58 +62,114 @@ export default function CodeCell({ id, initialCode = '', initialLanguage = 'pyth
     onLanguageChange?.(newLang);
   };
 
-  const handleCodeChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleCodeAreaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newCode = e.target.value;
     setCodeContent(newCode);
     onCodeChange?.(newCode);
   };
 
-  const handleRun = async () => {
+  const handleRun = useCallback(async () => {
     if (isRunning) return;
     setIsRunning(true);
     setExecutionResult(null);
 
     try {
-      // Fetch via Next.js server-side proxy to avoid client CORS/Failed to fetch errors
       const res = await fetch('/api/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            code: codeContent,
-            language: language,
-            stdin: stdinContent
+        body: JSON.stringify({
+          code: codeContent,
+          language,
+          stdin: stdinContent,
         }),
       });
-      
+
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.error || `HTTP Error ${res.status}`);
       }
-      
+
       const data = await res.json();
       setExecutionResult(data);
+      setRunCount(prev => prev + 1);
+
       if (data.status === 'Accepted' && !data.error && !data.stderr) {
         onExecutionComplete?.(true);
       } else {
         onExecutionComplete?.(false);
       }
     } catch (err: any) {
-      setExecutionResult({ error: err.message || 'Network error occurred. Ensure the backend is running on port 8080.' });
+      setExecutionResult({
+        error: err.message || 'Network error occurred. Ensure the backend is running on port 8080.',
+      });
+      setRunCount(prev => prev + 1);
       onExecutionComplete?.(false);
     } finally {
       setIsRunning(false);
     }
+  }, [codeContent, language, stdinContent, isRunning, onExecutionComplete]);
+
+  // External run trigger (from Run All)
+  useEffect(() => {
+    if (runTrigger > 0) {
+      handleRun();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runTrigger]);
+
+  const handleCopyOutput = () => {
+    const output =
+      executionResult?.stdout ||
+      executionResult?.stderr ||
+      executionResult?.error ||
+      '';
+    navigator.clipboard.writeText(output).then(() => {
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    });
   };
 
   return (
     <div className="flex flex-col rounded-xl border border-outline-variant bg-surface-container overflow-hidden shadow-xl ring-1 ring-white/5 mb-0 card-hover transition-all">
       {/* Cell Header */}
       <div className="flex items-center justify-between px-4 h-11 bg-surface-container-high border-b border-outline-variant/30">
-        <div className="flex items-center gap-3">
-          <span className="text-outline font-code-bold text-[11px]">[{id}]</span>
-          
+        <div className="flex items-center gap-2">
+          {/* Execution counter, like Jupyter's [n] */}
+          <span className="text-outline font-code-bold text-[11px] w-10 shrink-0">
+            [{runCount > 0 ? runCount : ' '}]
+          </span>
+
+          {/* ↑↓ Reorder buttons */}
+          <div className="flex items-center gap-0.5 border border-outline-variant/40 rounded-lg overflow-hidden">
+            <button
+              onClick={onMoveUp}
+              disabled={isFirst}
+              className={`p-1 transition-all duration-150 ${
+                isFirst
+                  ? 'opacity-20 cursor-not-allowed text-outline'
+                  : 'hover:bg-surface-variant text-on-surface-variant hover:text-on-surface cursor-pointer'
+              }`}
+              title="Move cell up (Alt+↑)"
+            >
+              <ChevronUp size={13} />
+            </button>
+            <div className="w-px h-3.5 bg-outline-variant/50" />
+            <button
+              onClick={onMoveDown}
+              disabled={isLast}
+              className={`p-1 transition-all duration-150 ${
+                isLast
+                  ? 'opacity-20 cursor-not-allowed text-outline'
+                  : 'hover:bg-surface-variant text-on-surface-variant hover:text-on-surface cursor-pointer'
+              }`}
+              title="Move cell down (Alt+↓)"
+            >
+              <ChevronDown size={13} />
+            </button>
+          </div>
+
           {/* Language Dropdown */}
-          <select 
+          <select
             value={language}
             onChange={handleLanguageChange}
             className="bg-surface-variant border border-outline-variant rounded-lg px-2.5 py-1 text-ui-label font-ui-label text-on-surface hover:border-primary/55 hover:bg-surface-variant/90 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/25 transition-all cursor-pointer font-semibold duration-200"
@@ -99,8 +180,9 @@ export default function CodeCell({ id, initialCode = '', initialLanguage = 'pyth
             <option value="nodejs">Node.js</option>
           </select>
         </div>
+
         <div className="flex items-center gap-2">
-          {/* AI Helper Toggle */}
+          {/* AI Helper */}
           <button
             onClick={onAiHelper}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-ui-label text-[12px] font-semibold text-primary bg-primary/10 border border-primary/20 hover:bg-primary hover:text-on-primary transition-all duration-200 shadow-sm"
@@ -109,34 +191,42 @@ export default function CodeCell({ id, initialCode = '', initialLanguage = 'pyth
             <Sparkles size={14} />
             <span>AI Helper</span>
           </button>
- 
+
+          {/* Stdin Toggle */}
           <button
             onClick={() => setIsStdinOpen(!isStdinOpen)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-ui-label text-[12px] font-semibold transition-all duration-200 shadow-sm ${
-              isStdinOpen 
-                ? 'bg-surface-variant text-on-surface border border-outline-variant/60' 
+              isStdinOpen
+                ? 'bg-surface-variant text-on-surface border border-outline-variant/60'
                 : 'text-on-surface-variant hover:bg-surface-variant border border-transparent hover:border-outline-variant/30'
             }`}
-            title="Provide Standard Input (stdin)"
+            title="Toggle standard input (stdin)"
           >
             <Keyboard size={14} />
             <span>Input</span>
           </button>
 
-          <button 
+          {/* Run Button */}
+          <button
             onClick={handleRun}
             disabled={isRunning}
             data-run-btn="true"
             className={`flex items-center gap-1.5 bg-secondary text-on-secondary border border-secondary/25 px-4 py-1.5 rounded-lg font-ui-label text-[12px] font-semibold transition-all duration-200 shadow-md shadow-secondary/20 hover:brightness-110 active:scale-95 ${
               isRunning ? 'opacity-70 cursor-not-allowed' : ''
             }`}
+            title="Run (Ctrl+Enter)"
           >
-            {isRunning ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} fill="currentColor" />}
+            {isRunning ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Play size={14} fill="currentColor" />
+            )}
             {isRunning ? 'Running...' : 'Run'}
           </button>
-          
+
+          {/* Delete */}
           {onDelete && (
-            <button 
+            <button
               onClick={onDelete}
               className="text-on-surface-variant hover:text-error hover:bg-error/10 transition-all duration-200 flex items-center p-1.5 rounded-lg ml-1"
               title="Delete cell"
@@ -146,20 +236,28 @@ export default function CodeCell({ id, initialCode = '', initialLanguage = 'pyth
           )}
         </div>
       </div>
+
       {/* Editor Content */}
       <div className="flex bg-surface-container-lowest relative">
-        <div className="absolute inset-0 bg-gradient-to-b from-surface-container/20 to-transparent pointer-events-none"></div>
+        <div className="absolute inset-0 bg-gradient-to-b from-surface-container/20 to-transparent pointer-events-none" />
         {/* Line Numbers */}
-        <div className="w-12 bg-surface-container-high/20 py-4 flex flex-col items-center font-code-block text-outline opacity-50 select-none border-r border-outline-variant/30">
+        <div className="w-12 bg-surface-container-high/20 py-4 flex flex-col items-center font-code-block text-outline opacity-50 select-none border-r border-outline-variant/30 text-[12px]">
           {codeContent.split('\n').map((_, i) => (
             <div key={i}>{i + 1}</div>
           ))}
         </div>
-        {/* Code Area */}
+        {/* Code Textarea */}
         <div className="flex-1 font-code-block text-code-block text-on-surface-variant leading-relaxed relative flex">
-          <textarea 
+          <textarea
             value={codeContent}
-            onChange={handleCodeChange}
+            onChange={handleCodeAreaChange}
+            onKeyDown={(e) => {
+              // Ctrl+Enter or Cmd+Enter → run
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                handleRun();
+              }
+            }}
             className="w-full bg-transparent p-4 outline-none resize-none overflow-hidden text-on-surface-variant font-code-block leading-relaxed"
             rows={Math.max(codeContent.split('\n').length, 5)}
             spellCheck={false}
@@ -193,38 +291,83 @@ export default function CodeCell({ id, initialCode = '', initialLanguage = 'pyth
         {isRunning ? (
           <div className="flex items-center gap-2">
             <Loader2 size={16} className="text-outline animate-spin" />
-            <span className="font-console-text text-console-text text-outline/80 text-[11px]">Executing code on JDoodle...</span>
+            <span className="font-console-text text-console-text text-outline/80 text-[11px]">
+              Executing code on JDoodle...
+            </span>
           </div>
         ) : executionResult ? (
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                {executionResult.stderr || executionResult.error || executionResult.status !== 'Accepted' ? (
+                {executionResult.stderr ||
+                executionResult.error ||
+                executionResult.status !== 'Accepted' ? (
                   <AlertCircle size={15} className="text-error" />
                 ) : (
                   <CheckCircle2 size={15} className="text-secondary" />
                 )}
-                <span className={`font-console-text text-[11px] ${executionResult.stderr || executionResult.error || executionResult.status !== 'Accepted' ? 'text-error/80' : 'text-secondary/80'}`}>
-                  {executionResult.error ? executionResult.error : `${executionResult.status || 'Accepted'} ${executionResult.time ? `(Time: ${executionResult.time}s, Mem: ${executionResult.memory}KB)` : ''}`}
+                <span
+                  className={`font-console-text text-[11px] ${
+                    executionResult.stderr ||
+                    executionResult.error ||
+                    executionResult.status !== 'Accepted'
+                      ? 'text-error/80'
+                      : 'text-secondary/80'
+                  }`}
+                >
+                  {executionResult.error
+                    ? executionResult.error
+                    : `${executionResult.status || 'Accepted'} ${
+                        executionResult.time
+                          ? `(Time: ${executionResult.time}s, Mem: ${executionResult.memory}KB)`
+                          : ''
+                      }`}
                 </span>
               </div>
-              <span className="font-ui-label text-[9px] text-outline uppercase tracking-wider">Output</span>
+
+              {/* Copy Output button */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleCopyOutput}
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-ui-label text-outline hover:text-on-surface hover:bg-surface-variant transition-all"
+                  title="Copy output to clipboard"
+                >
+                  {isCopied ? (
+                    <Check size={11} className="text-secondary" />
+                  ) : (
+                    <Copy size={11} />
+                  )}
+                  {isCopied ? 'Copied!' : 'Copy'}
+                </button>
+                <span className="font-ui-label text-[9px] text-outline uppercase tracking-wider">
+                  Output
+                </span>
+              </div>
             </div>
+
             {executionResult.stdout && (
-              <pre className="font-console-text text-[12px] text-on-surface whitespace-pre-wrap mt-1">{executionResult.stdout}</pre>
+              <pre className="font-console-text text-[12px] text-on-surface whitespace-pre-wrap mt-1">
+                {executionResult.stdout}
+              </pre>
             )}
             {executionResult.stderr && (
-              <pre className="font-console-text text-[12px] text-error whitespace-pre-wrap mt-1">{executionResult.stderr}</pre>
+              <pre className="font-console-text text-[12px] text-error whitespace-pre-wrap mt-1">
+                {executionResult.stderr}
+              </pre>
             )}
             {executionResult.compile_output && (
-              <pre className="font-console-text text-[12px] text-error whitespace-pre-wrap mt-1">{executionResult.compile_output}</pre>
+              <pre className="font-console-text text-[12px] text-error whitespace-pre-wrap mt-1">
+                {executionResult.compile_output}
+              </pre>
             )}
           </div>
         ) : (
           <div className="flex items-center justify-between text-outline/50">
             <div className="flex items-center gap-2">
               <BrainCircuit size={15} />
-              <span className="font-console-text text-[11px]">Console ready...</span>
+              <span className="font-console-text text-[11px]">
+                Console ready — press <kbd className="font-ui-label text-[10px] bg-surface-variant px-1 py-0.5 rounded border border-outline-variant/50">Ctrl+Enter</kbd> to run
+              </span>
             </div>
             <span className="font-ui-label text-[9px] uppercase tracking-wider">Output</span>
           </div>

@@ -4,7 +4,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useTheme } from '@/components/ThemeProvider';
 import CodeCell from '@/components/CodeCell';
 import TextCell from '@/components/TextCell';
-import { Share2, Settings, UserCircle, Sun, Moon, HelpCircle, FilePlus, CheckCircle2, Activity, Zap, Bell, PlusCircle, Type, Trash2, X, Copy, Sparkles, AlertCircle, TrendingUp, Maximize2, Info } from 'lucide-react';
+import { Share2, Settings, UserCircle, Sun, Moon, HelpCircle, FilePlus, CheckCircle2, Activity, Zap, Bell, PlusCircle, Type, Trash2, X, Copy, Sparkles, AlertCircle, TrendingUp, Maximize2, Info, PlayCircle, Save } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -39,6 +39,12 @@ export default function CollabCodeIDE() {
 
   // Audio instances ref for preloading to prevent lag
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({});
+
+  // --- Persistence & Run All state ---
+  const [showSavedToast, setShowSavedToast] = useState(false);
+  const [cellRunTriggers, setCellRunTriggers] = useState<Record<string, number>>({});
+  const [runAllQueue, setRunAllQueue] = useState<string[]>([]);
+  const [isRunningAll, setIsRunningAll] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [loadingText, setLoadingText] = useState('Initializing compiler environments...');
 
@@ -193,6 +199,55 @@ export default function CollabCodeIDE() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
+  // LocalStorage: load saved notebook when app finishes loading
+  useEffect(() => {
+    if (!isLoaded) return;
+    try {
+      const saved = localStorage.getItem('collabcode-notebook');
+      if (saved) {
+        const { cells: savedCells, title: savedTitle } = JSON.parse(saved);
+        if (Array.isArray(savedCells) && savedCells.length > 0) setCells(savedCells);
+        if (savedTitle) setTitle(savedTitle);
+      }
+    } catch (e) {
+      console.warn('Could not restore notebook from localStorage:', e);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded]);
+
+  // LocalStorage: debounced auto-save on every cells/title change
+  useEffect(() => {
+    if (!isLoaded) return;
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem('collabcode-notebook', JSON.stringify({ cells, title }));
+        setShowSavedToast(true);
+        setTimeout(() => setShowSavedToast(false), 2000);
+      } catch (e) {
+        console.warn('Auto-save failed:', e);
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [cells, title, isLoaded]);
+
+  // Ctrl+S → force-save immediately
+  useEffect(() => {
+    const handleCtrlS = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        try {
+          localStorage.setItem('collabcode-notebook', JSON.stringify({ cells, title }));
+          setShowSavedToast(true);
+          setTimeout(() => setShowSavedToast(false), 2000);
+        } catch (e) {
+          console.warn('Save failed:', e);
+        }
+      }
+    };
+    document.addEventListener('keydown', handleCtrlS);
+    return () => document.removeEventListener('keydown', handleCtrlS);
+  }, [cells, title]);
+
   const addCodeCell = () => {
     const newId = Date.now().toString();
     setCells([...cells, { id: newId, type: 'code', language: 'python3', code: '', stdin: '' }]);
@@ -229,6 +284,54 @@ export default function CollabCodeIDE() {
   const handleTextContentChange = useCallback((id: string, content: string) => {
     setCells(prev => prev.map(c => c.id === id ? { ...c, content } : c));
   }, []);
+
+  // --- Cell Reorder ---
+  const moveCellUp = useCallback((id: string) => {
+    setCells(prev => {
+      const idx = prev.findIndex(c => c.id === id);
+      if (idx <= 0) return prev;
+      const next = [...prev];
+      [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+      return next;
+    });
+  }, []);
+
+  const moveCellDown = useCallback((id: string) => {
+    setCells(prev => {
+      const idx = prev.findIndex(c => c.id === id);
+      if (idx >= prev.length - 1) return prev;
+      const next = [...prev];
+      [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+      return next;
+    });
+  }, []);
+
+  // --- Run All Cells (sequential via onExecutionComplete queue) ---
+  const handleRunAll = useCallback(() => {
+    const codeCellIds = cells.filter(c => c.type === 'code').map(c => c.id);
+    if (codeCellIds.length === 0) return;
+    setIsRunningAll(true);
+    const [first, ...rest] = codeCellIds;
+    setRunAllQueue(rest);
+    setCellRunTriggers(prev => ({ ...prev, [first]: (prev[first] || 0) + 1 }));
+  }, [cells]);
+
+  // Called when any cell completes execution
+  const handleCellExecutionComplete = useCallback((cellId: string, success: boolean) => {
+    if (success) playSound('correct');
+    else playSound('error');
+    // Advance Run All queue
+    setRunAllQueue(prev => {
+      if (prev.length === 0) {
+        setIsRunningAll(false);
+        return [];
+      }
+      const [next, ...rest] = prev;
+      setCellRunTriggers(t => ({ ...t, [next]: (t[next] || 0) + 1 }));
+      if (rest.length === 0) setIsRunningAll(false);
+      return rest;
+    });
+  }, [playSound]);
 
   // --- Share: PNG screenshot (using html-to-image – avoids oklab parse errors from Tailwind v4) ---
   const handleExportPng = async () => {
@@ -597,7 +700,7 @@ export default function CollabCodeIDE() {
             
             {/* Render Reusable Code and Text Cells */}
             <div id="notebook-cells" className="flex flex-col gap-5 mb-0">
-              {cells.map((cell) => {
+              {cells.map((cell, cellIdx) => {
                 if (cell.type === 'code') {
                   return (
                       <CodeCell 
@@ -611,10 +714,12 @@ export default function CollabCodeIDE() {
                         onLanguageChange={(lang) => handleLanguageChange(cell.id, lang)}
                         onStdinChange={(stdin) => handleStdinChange(cell.id, stdin)}
                         onAiHelper={() => handleOpenAiSidebar(cell.id)}
-                        onExecutionComplete={(success) => {
-                          if (success) playSound('correct');
-                          else playSound('error');
-                        }}
+                        onExecutionComplete={(success) => handleCellExecutionComplete(cell.id, success)}
+                        onMoveUp={() => moveCellUp(cell.id)}
+                        onMoveDown={() => moveCellDown(cell.id)}
+                        isFirst={cellIdx === 0}
+                        isLast={cellIdx === cells.length - 1}
+                        runTrigger={cellRunTriggers[cell.id] || 0}
                       />
                   );
                 } else {
@@ -648,6 +753,18 @@ export default function CollabCodeIDE() {
                 >
                   <Type size={18} className="text-on-surface-variant" />
                   <span className="font-ui-label text-[13px] text-on-surface-variant group-hover:text-on-surface transition-colors font-semibold">Text Cell</span>
+                </button>
+                <div className="h-5 w-px bg-outline-variant/60"></div>
+                <button
+                  onClick={handleRunAll}
+                  disabled={isRunningAll || cells.filter(c => c.type === 'code').length === 0}
+                  className="flex items-center gap-2 cursor-pointer group bg-transparent border-none text-left px-3 py-1.5 rounded-full hover:bg-secondary/10 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Run all code cells sequentially"
+                >
+                  <PlayCircle size={18} className={`${isRunningAll ? 'text-secondary animate-pulse' : 'text-secondary'}`} />
+                  <span className="font-ui-label text-[13px] text-on-surface-variant group-hover:text-secondary transition-colors font-semibold">
+                    {isRunningAll ? 'Running All...' : 'Run All'}
+                  </span>
                 </button>
                 <div className="h-5 w-px bg-outline-variant/60"></div>
                 <button 
@@ -829,6 +946,12 @@ export default function CollabCodeIDE() {
         )}
       </div>
 
+      {/* Auto-save Toast */}
+      <div className={`fixed bottom-12 right-4 z-[200] flex items-center gap-2 bg-surface-container-highest border border-outline-variant/60 px-3 py-2 rounded-lg shadow-lg text-[12px] font-ui-label text-on-surface transition-all duration-300 ${showSavedToast ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'}`}>
+        <Save size={13} className="text-secondary" />
+        <span>Notebook saved</span>
+      </div>
+
       {/* Utility Status Bar */}
       <footer className="w-full h-8 bg-surface-container-low border-t border-outline-variant flex items-center justify-between px-4 z-50 shrink-0">
         <div className="flex items-center gap-5 text-[11px] font-ui-label text-on-surface-variant font-medium">
@@ -846,6 +969,9 @@ export default function CollabCodeIDE() {
         <div className="flex items-center gap-4 text-[11px] font-ui-label text-on-surface-variant font-medium">
           <span>UTF-8</span>
           <span className="flex items-center gap-1.5"><CheckCircle2 size={14} className="text-secondary" /> JDoodle Ready</span>
+          <span className="flex items-center gap-1 text-outline/60" title="Ctrl+S to save">
+            <Save size={12} /> Auto-saved
+          </span>
           <button className="hover:text-primary transition-colors">
             <Bell size={14} />
           </button>
