@@ -4,6 +4,9 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useTheme } from '@/components/ThemeProvider';
 import CodeCell from '@/components/CodeCell';
 import TextCell from '@/components/TextCell';
+import { Share2, Settings, UserCircle, Sun, Moon, HelpCircle, FilePlus, CheckCircle2, Activity, Zap, Bell, PlusCircle, Type, Trash2, X, Copy, Sparkles, AlertCircle, TrendingUp, Maximize2, Info } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 export default function CollabCodeIDE() {
   const { isDark, toggleTheme } = useTheme();
@@ -13,8 +16,8 @@ export default function CollabCodeIDE() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
 
   // State for notebook cells
-  const [cells, setCells] = useState<Array<{ id: string; type: 'code' | 'text'; language?: string; code?: string; content?: string }>>([    { id: '1', type: 'code', language: 'python3', code: '' },
-    { id: '2', type: 'code', language: 'nodejs', code: '' }
+  const [cells, setCells] = useState<Array<{ id: string; type: 'code' | 'text'; language?: string; code?: string; content?: string; stdin?: string }>>([    { id: '1', type: 'code', language: 'python3', code: '', stdin: '' },
+    { id: '2', type: 'code', language: 'nodejs', code: '', stdin: '' }
   ]);
 
   // Ref for the notebook canvas area (for screenshot)
@@ -29,10 +32,155 @@ export default function CollabCodeIDE() {
 
   // State for import modal
   const [importModalOpen, setImportModalOpen] = useState(false);
-  const [pendingImportCells, setPendingImportCells] = useState<Array<{ id: string; type: 'code' | 'text'; language?: string; code?: string; content?: string }>>([]);
+  const [pendingImportCells, setPendingImportCells] = useState<Array<{ id: string; type: 'code' | 'text'; language?: string; code?: string; content?: string; stdin?: string }>>([]);
   const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [activeHelpTab, setActiveHelpTab] = useState<'overview' | 'ai' | 'share' | 'shortcuts'>('overview');
+
+  // Audio instances ref for preloading to prevent lag
+  const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({});
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [loadingText, setLoadingText] = useState('Initializing compiler environments...');
+
+  // Set up loop for Pop sound during loading
+  useEffect(() => {
+    let popAudio: HTMLAudioElement | null = null;
+    let textInterval: NodeJS.Timeout;
+    
+    if (typeof window !== 'undefined' && !isLoaded) {
+      popAudio = new Audio('/Sound-eff/Pop1_Pop2_pop3.mp3.mpeg');
+      popAudio.loop = true;
+      popAudio.volume = 0.4;
+      popAudio.play().catch(e => console.log('Autoplay pop sound blocked:', e));
+
+      // Cycle loading messages for rich UX
+      const texts = [
+        'Initializing compiler environments...',
+        'Connecting to execution servers...',
+        'Synchronizing with JDoodle core...',
+        'Optimizing editor workspace...',
+        'Rendering interface modules...'
+      ];
+      let idx = 0;
+      textInterval = setInterval(() => {
+        idx = (idx + 1) % texts.length;
+        setLoadingText(texts[idx]);
+      }, 800);
+    }
+
+    const timer = setTimeout(() => {
+      setIsLoaded(true);
+      if (popAudio) {
+        popAudio.pause();
+      }
+    }, 4000); // 4 seconds loading screen to simulate loading
+
+    return () => {
+      clearTimeout(timer);
+      if (textInterval) clearInterval(textInterval);
+      if (popAudio) {
+        popAudio.pause();
+      }
+    };
+  }, [isLoaded]);
+
+  useEffect(() => {
+    // Preload audio files on mount
+    if (typeof window !== 'undefined') {
+      audioRefs.current.bubble = new Audio('/Sound-eff/bubble.mp3.mpeg');
+      audioRefs.current.bubble.preload = 'auto';
+      audioRefs.current.pop = new Audio('/Sound-eff/Pop1_Pop2_pop3.mp3.mpeg');
+      audioRefs.current.pop.preload = 'auto';
+      audioRefs.current.correct = new Audio('/Sound-eff/correct.mp3');
+      audioRefs.current.correct.preload = 'auto';
+      audioRefs.current.error = new Audio('/Sound-eff/error.mp3');
+      audioRefs.current.error.preload = 'auto';
+    }
+  }, []);
+
+  // Sound effects logic
+  const playSound = useCallback((type: 'bubble' | 'pop' | 'correct' | 'error') => {
+    try {
+      const audio = audioRefs.current[type];
+      if (audio) {
+        // Clone the node to allow overlapping sounds without fetching again
+        const clone = audio.cloneNode(true) as HTMLAudioElement;
+        clone.volume = 0.5;
+        clone.play().catch(e => console.log('Audio play failed (maybe autoplay policy):', e));
+      }
+    } catch (e) {
+      console.error('Failed to play sound:', e);
+    }
+  }, []);
+
+  // Global Button Click Sound (excluding Run button)
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // Play bubble sound if a button or something acting like a button is clicked
+      const button = target.closest('button') || target.closest('[role="button"]') || (target.tagName.toLowerCase() === 'button' ? target : null);
+      if (button) {
+        // Exclude Run button
+        if (
+          button.getAttribute('data-run-btn') === 'true' || 
+          button.textContent?.trim() === 'Run' || 
+          button.textContent?.trim() === 'Running...'
+        ) {
+          return;
+        }
+        playSound('bubble');
+      }
+    };
+    document.addEventListener('click', handleGlobalClick, true);
+    return () => document.removeEventListener('click', handleGlobalClick, true);
+  }, [playSound]);
+
+  // State for AI Sidebar
+  const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
+  const [activeCellIdForAi, setActiveCellIdForAi] = useState<string | null>(null);
+  const [aiQuery, setAiQuery] = useState('');
+  const [lastQuery, setLastQuery] = useState('');
+  const [aiResponse, setAiResponse] = useState('');
+  const [isAiLoading, setIsAiLoading] = useState(false);
+
+  const handleOpenAiSidebar = (cellId: string) => {
+    setActiveCellIdForAi(cellId);
+    setIsAiSidebarOpen(true);
+  };
+
+  const closeAiSidebar = () => {
+    setIsAiSidebarOpen(false);
+    setActiveCellIdForAi(null);
+  };
+
+  const handleAiAnalyze = async (customPrompt?: string) => {
+    const promptToSend = customPrompt || aiQuery;
+    if (!promptToSend.trim() && !customPrompt) return;
+    const activeCell = cells.find(c => c.id === activeCellIdForAi);
+    if (!activeCell || activeCell.type !== 'code') return;
+    
+    setLastQuery(promptToSend);
+    setIsAiLoading(true);
+    setAiResponse('');
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: activeCell.code || '',
+          language: activeCell.language || 'python3',
+          prompt: promptToSend
+        })
+      });
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      const data = await res.json();
+      setAiResponse(data.response);
+    } catch (err: any) {
+      setAiResponse(`❌ Error generating response: ${err.message || 'Unknown network error'}`);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
 
   // Close share dropdown on outside click
   useEffect(() => {
@@ -41,13 +189,13 @@ export default function CollabCodeIDE() {
         setIsShareOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
   const addCodeCell = () => {
     const newId = Date.now().toString();
-    setCells([...cells, { id: newId, type: 'code', language: 'python3', code: '' }]);
+    setCells([...cells, { id: newId, type: 'code', language: 'python3', code: '', stdin: '' }]);
   };
 
   const addTextCell = () => {
@@ -72,6 +220,10 @@ export default function CollabCodeIDE() {
 
   const handleLanguageChange = useCallback((id: string, language: string) => {
     setCells(prev => prev.map(c => c.id === id ? { ...c, language } : c));
+  }, []);
+
+  const handleStdinChange = useCallback((id: string, stdin: string) => {
+    setCells(prev => prev.map(c => c.id === id ? { ...c, stdin } : c));
   }, []);
 
   const handleTextContentChange = useCallback((id: string, content: string) => {
@@ -180,15 +332,16 @@ export default function CollabCodeIDE() {
     setIsShareOpen(false);
     const exportData = cells.map(cell => {
       if (cell.type === 'code') {
-        return { type: 'code', language: cell.language || 'python3', code: cell.code || '' };
+        return { type: 'code', language: cell.language || 'python3', code: cell.code || '', stdin: cell.stdin || '' };
       } else {
         return { type: 'text', content: cell.content || '' };
       }
     });
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
     const link = document.createElement('a');
+    const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_');
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    link.download = `session-code-${ts}.json`;
+    link.download = `${safeTitle}-${ts}-code.json`;
     link.href = URL.createObjectURL(blob);
     link.click();
     URL.revokeObjectURL(link.href);
@@ -208,7 +361,7 @@ export default function CollabCodeIDE() {
         const newCells = data.map((item: any, idx: number) => {
           const newId = Date.now().toString() + '-' + idx + '-' + Math.random().toString(36).slice(2, 7);
           if (item.type === 'code') {
-            return { id: newId, type: 'code' as const, language: item.language || 'python3', code: item.code || '' };
+            return { id: newId, type: 'code' as const, language: item.language || 'python3', code: item.code || '', stdin: item.stdin || '' };
           } else {
             return { id: newId, type: 'text' as const, content: item.content || '' };
           }
@@ -265,52 +418,7 @@ export default function CollabCodeIDE() {
     { id: '3', name: 'README.md', icon: 'description', active: false },
   ]);
 
-  // State for Terminal
-  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
-  const [terminalLines, setTerminalLines] = useState<Array<{ type: 'command' | 'output' | 'error'; text: string }>>([
-    { type: 'output', text: 'CollabCode Interactive Terminal v1.0' },
-    { type: 'output', text: 'Connected to local host shell. Type a command (e.g. dir, echo hello, npm run dev) and press Enter.' }
-  ]);
-  const [currentCommand, setCurrentCommand] = useState('');
-  const [isTerminalRunning, setIsTerminalRunning] = useState(false);
-  const terminalBottomRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to bottom of terminal
-  useEffect(() => {
-    if (isTerminalOpen && terminalBottomRef.current) {
-      terminalBottomRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [terminalLines, isTerminalOpen]);
-
-  const handleTerminalSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cmd = currentCommand.trim();
-    if (!cmd) return;
-
-    // Add command to history list
-    setTerminalLines(prev => [...prev, { type: 'command', text: cmd }]);
-    setCurrentCommand('');
-    setIsTerminalRunning(true);
-
-    try {
-      const response = await fetch('/api/terminal', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: cmd }),
-      });
-      const data = await response.json();
-      if (data.stdout) {
-        setTerminalLines(prev => [...prev, { type: 'output', text: data.stdout }]);
-      }
-      if (data.stderr) {
-        setTerminalLines(prev => [...prev, { type: 'error', text: data.stderr }]);
-      }
-    } catch (err: any) {
-      setTerminalLines(prev => [...prev, { type: 'error', text: 'Error connecting to terminal API.' }]);
-    } finally {
-      setIsTerminalRunning(false);
-    }
-  };
 
   const handleTitleSubmit = (e: React.KeyboardEvent<HTMLInputElement> | React.FocusEvent<HTMLInputElement>) => {
     if ('key' in e && e.key === 'Enter') {
@@ -334,14 +442,52 @@ export default function CollabCodeIDE() {
     setFiles(files.map(f => ({ ...f, active: f.id === id })));
   };
 
+  if (!isLoaded) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen w-screen bg-[#0b1326] text-white font-ui-body relative overflow-hidden select-none">
+        {/* Background glow effects */}
+        <div className="absolute top-1/4 left-1/4 w-[350px] h-[350px] bg-primary/15 rounded-full blur-[100px] animate-pulse"></div>
+        <div className="absolute bottom-1/4 right-1/4 w-[350px] h-[350px] bg-secondary/20 rounded-full blur-[100px] animate-pulse" style={{ animationDelay: '1s' }}></div>
+
+        {/* Content container */}
+        <div className="z-10 flex flex-col items-center gap-6 max-w-sm text-center px-6">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center shadow-xl shadow-primary/20 animate-bounce">
+            <Sparkles size={32} className="text-white" strokeWidth={2.5} />
+          </div>
+          
+          <div className="flex flex-col gap-2">
+            <h1 className="font-ui-header text-[26px] font-bold tracking-tight bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+              CollabCode
+            </h1>
+            <p className="font-ui-label text-[13px] text-outline/80 font-medium tracking-wide">
+              POWERFUL COLLABORATIVE IDE
+            </p>
+          </div>
+
+          {/* Glowing loader bar */}
+          <div className="w-64 h-1.5 bg-surface-container rounded-full overflow-hidden border border-outline-variant/30 mt-4 shadow-inner relative">
+            <div className="h-full bg-gradient-to-r from-primary via-secondary to-primary w-1/2 rounded-full animate-infinite-slide absolute left-0 top-0"></div>
+          </div>
+
+          <p className="font-ui-label text-[12px] text-outline/60 mt-2 font-medium animate-pulse">
+            {loadingText}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen bg-background text-on-background font-ui-body selection:bg-primary/30">
       {/* TopNavBar */}
-      <header className="flex items-center justify-between w-full h-12 px-4 bg-surface-container border-b border-outline-variant shrink-0">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <span className="font-ui-header text-ui-header font-bold text-primary">CollabCode</span>
-            <div className="h-4 w-px bg-outline-variant mx-2"></div>
+      <header className="flex items-center justify-between w-full h-12 px-4 bg-surface-container/90 backdrop-blur-md border-b border-outline-variant shrink-0 z-50">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary">
+              <Sparkles size={16} strokeWidth={2.5} />
+            </div>
+            <span className="font-ui-header text-[15px] font-bold text-on-surface tracking-tight">CollabCode</span>
+            <div className="h-5 w-px bg-outline-variant mx-1"></div>
             {isEditingTitle ? (
               <input
                 autoFocus
@@ -350,11 +496,11 @@ export default function CollabCodeIDE() {
                 onChange={(e) => setTitle(e.target.value)}
                 onBlur={handleTitleSubmit}
                 onKeyDown={handleTitleSubmit}
-                className="bg-surface border border-primary rounded px-2 py-1 text-ui-header font-ui-header text-on-surface focus:outline-none"
+                className="bg-surface border border-primary/50 rounded px-2 py-0.5 text-[13px] font-ui-header text-on-surface focus:outline-none focus:ring-1 focus:ring-primary/40 transition-all shadow-sm"
               />
             ) : (
               <span 
-                className="font-ui-header text-ui-header text-on-surface-variant opacity-80 cursor-pointer hover:opacity-100 transition-opacity"
+                className="font-ui-header text-[13px] font-medium text-on-surface-variant hover:text-primary cursor-pointer transition-colors duration-200"
                 onClick={() => setIsEditingTitle(true)}
                 title="Click to rename"
               >
@@ -362,22 +508,22 @@ export default function CollabCodeIDE() {
               </span>
             )}
           </div>
-          <nav className="hidden md:flex items-center gap-4">
+          <nav className="hidden md:flex items-center gap-1 ml-4">
             {['File', 'Edit', 'View', 'Runtime', 'Tools'].map(item => (
-              <span key={item} className="font-ui-label text-ui-label text-on-surface-variant font-medium cursor-pointer hover:bg-surface-variant px-2 py-1 rounded transition-colors">{item}</span>
+              <span key={item} className="font-ui-label text-[12px] text-on-surface-variant font-medium cursor-pointer hover:bg-surface-variant hover:text-on-surface px-2.5 py-1 rounded-md transition-all duration-200">{item}</span>
             ))}
             <span 
               onClick={() => setIsHelpOpen(true)}
-              className="font-ui-label text-ui-label text-primary font-semibold cursor-pointer hover:bg-primary/10 px-2 py-1 rounded transition-colors flex items-center gap-1"
+              className="font-ui-label text-[12px] text-primary font-medium cursor-pointer hover:bg-primary/10 px-2.5 py-1 rounded-md transition-all duration-200 flex items-center gap-1.5 ml-1"
             >
-              <span className="material-symbols-outlined text-[15px]">help</span>
+              <HelpCircle size={14} />
               Help
             </span>
             <button
               onClick={() => { handleFileInputClick(); fileInputRef.current?.click(); }}
-              className="font-ui-label text-ui-label text-on-surface-variant font-medium cursor-pointer hover:bg-surface-variant px-2 py-1 rounded transition-colors flex items-center gap-1"
+              className="font-ui-label text-[12px] text-on-surface-variant font-medium cursor-pointer hover:bg-surface-variant hover:text-on-surface px-2.5 py-1 rounded-md transition-all duration-200 flex items-center gap-1.5"
             >
-              <span className="material-symbols-outlined text-[16px]">upload_file</span>
+              <FilePlus size={14} />
               Insert
             </button>
             <input
@@ -389,52 +535,56 @@ export default function CollabCodeIDE() {
             />
           </nav>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {/* Share Dropdown */}
           <div className="relative" ref={shareRef}>
             <button
               onClick={() => setIsShareOpen(!isShareOpen)}
-              className="bg-primary text-on-primary font-ui-label text-ui-label px-4 py-1.5 rounded-lg hover:opacity-90 active:opacity-80 transition-opacity font-semibold flex items-center gap-1.5"
+              className="bg-primary text-on-primary font-ui-label text-[12px] px-3.5 py-1.5 rounded-lg transition-all duration-200 font-semibold flex items-center gap-1.5 hover:brightness-110 active:brightness-95 shadow-sm shadow-primary/20"
             >
-              <span className="material-symbols-outlined text-[18px]">share</span>
+              <Share2 size={14} />
               Share
-              <span className="material-symbols-outlined text-[14px]">{isShareOpen ? 'expand_less' : 'expand_more'}</span>
             </button>
             {isShareOpen && (
-              <div className="absolute right-0 top-full mt-2 w-64 bg-surface-container-highest border border-outline-variant rounded-xl shadow-2xl z-50 overflow-hidden animate-in">
+              <div className="absolute right-0 top-full mt-2 w-64 glass-panel rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in duration-150">
                 <button
                   onClick={handleExportPng}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-variant transition-colors text-left"
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-primary/10 transition-colors text-left group border-b border-outline-variant/30"
                 >
-                  <span className="material-symbols-outlined text-primary text-[20px]">photo_camera</span>
+                  <Maximize2 size={18} className="text-primary" />
                   <div>
-                    <div className="font-ui-label text-ui-label text-on-surface font-semibold">Export as PNG</div>
-                    <div className="font-ui-label text-[11px] text-outline">Screenshot all cells &amp; outputs</div>
+                    <div className="font-ui-label text-[13px] text-on-surface font-semibold group-hover:text-primary transition-colors">Export as PNG</div>
+                    <div className="font-ui-label text-[11px] text-outline mt-0.5">Screenshot all cells</div>
                   </div>
                 </button>
-                <div className="h-px bg-outline-variant mx-3"></div>
                 <button
                   onClick={handleExportJson}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-variant transition-colors text-left"
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-secondary/10 transition-colors text-left group"
                 >
-                  <span className="material-symbols-outlined text-secondary text-[20px]">data_object</span>
+                  <FilePlus size={18} className="text-secondary" />
                   <div>
-                    <div className="font-ui-label text-ui-label text-on-surface font-semibold">Export as JSON</div>
-                    <div className="font-ui-label text-[11px] text-outline">Code &amp; text cells data</div>
+                    <div className="font-ui-label text-[13px] text-on-surface font-semibold group-hover:text-secondary transition-colors">Export as JSON</div>
+                    <div className="font-ui-label text-[11px] text-outline mt-0.5">Code &amp; text data</div>
                   </div>
                 </button>
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2 text-on-surface-variant">
-            <span 
-              className="material-symbols-outlined cursor-pointer hover:bg-surface-variant p-1 rounded transition-colors"
+          <div className="h-5 w-px bg-outline-variant/60 mx-1"></div>
+          <div className="flex items-center gap-1 text-on-surface-variant">
+            <button 
+              className="p-1.5 rounded-md hover:bg-surface-variant hover:text-primary transition-colors"
               onClick={toggleTheme}
+              title="Toggle Theme"
             >
-              {isDark ? 'light_mode' : 'dark_mode'}
-            </span>
-            <span className="material-symbols-outlined cursor-pointer hover:bg-surface-variant p-1 rounded">settings</span>
-            <span className="material-symbols-outlined cursor-pointer hover:bg-surface-variant p-1 rounded">account_circle</span>
+              {isDark ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <button className="p-1.5 rounded-md hover:bg-surface-variant hover:text-primary transition-colors" title="Settings">
+              <Settings size={18} />
+            </button>
+            <button className="p-1.5 rounded-md hover:bg-surface-variant hover:text-primary transition-colors" title="Profile">
+              <UserCircle size={20} />
+            </button>
           </div>
         </div>
       </header>
@@ -443,22 +593,29 @@ export default function CollabCodeIDE() {
       <div className="flex flex-1 overflow-hidden relative">
       {/* Main Workspace Canvas */}
         <main className="flex-1 flex flex-col bg-background overflow-y-auto scroll-smooth relative">
-          <div ref={notebookRef} className="max-w-5xl mx-auto w-full p-8 flex flex-col pb-16">
+          <div ref={notebookRef} className="max-w-5xl mx-auto w-full p-6 flex flex-col pb-16">
             
             {/* Render Reusable Code and Text Cells */}
-            <div id="notebook-cells" className="flex flex-col gap-8 mb-8">
+            <div id="notebook-cells" className="flex flex-col gap-5 mb-0">
               {cells.map((cell) => {
                 if (cell.type === 'code') {
                   return (
-                    <CodeCell 
-                      key={cell.id} 
-                      id={cell.id} 
-                      initialCode={cell.code}
-                      initialLanguage={cell.language} 
-                      onDelete={() => deleteCell(cell.id)}
-                      onCodeChange={(code) => handleCodeChange(cell.id, code)}
-                      onLanguageChange={(lang) => handleLanguageChange(cell.id, lang)}
-                    />
+                      <CodeCell 
+                        key={cell.id} 
+                        id={cell.id} 
+                        initialCode={cell.code}
+                        initialLanguage={cell.language} 
+                        initialStdin={cell.stdin}
+                        onDelete={() => deleteCell(cell.id)}
+                        onCodeChange={(code) => handleCodeChange(cell.id, code)}
+                        onLanguageChange={(lang) => handleLanguageChange(cell.id, lang)}
+                        onStdinChange={(stdin) => handleStdinChange(cell.id, stdin)}
+                        onAiHelper={() => handleOpenAiSidebar(cell.id)}
+                        onExecutionComplete={(success) => {
+                          if (success) playSound('correct');
+                          else playSound('error');
+                        }}
+                      />
                   );
                 } else {
                   return (
@@ -475,139 +632,223 @@ export default function CollabCodeIDE() {
             </div>
 
             {/* Floating Toolbar for Actions */}
-            <div className="flex justify-center mt-4">
-              <div className="bg-surface-container-highest border border-outline-variant rounded-full px-6 py-3 flex items-center gap-6 shadow-2xl">
+            <div className="flex justify-center mt-5">
+              <div className="bg-surface-container-highest/85 backdrop-blur-md border border-outline-variant/60 rounded-full px-5 py-2 flex items-center gap-4 shadow-2xl transition-all duration-300">
                 <button 
                   onClick={addCodeCell}
-                  className="flex items-center gap-2 cursor-pointer group bg-transparent border-none text-left"
+                  className="flex items-center gap-2 cursor-pointer group bg-transparent border-none text-left px-3 py-1.5 rounded-full hover:bg-primary/10 transition-all duration-200"
                 >
-                  <span className="material-symbols-outlined text-primary group-hover:scale-110 transition-transform">add_circle</span>
-                  <span className="font-ui-label text-ui-label text-on-surface-variant font-bold">Code Cell</span>
+                  <PlusCircle size={18} className="text-primary" />
+                  <span className="font-ui-label text-[13px] text-on-surface-variant group-hover:text-primary transition-colors font-semibold">Code Cell</span>
                 </button>
-                <div className="h-4 w-px bg-outline-variant"></div>
+                <div className="h-5 w-px bg-outline-variant/60"></div>
                 <button 
                   onClick={addTextCell}
-                  className="flex items-center gap-2 cursor-pointer group bg-transparent border-none text-left"
+                  className="flex items-center gap-2 cursor-pointer group bg-transparent border-none text-left px-3 py-1.5 rounded-full hover:bg-surface-variant transition-all duration-200"
                 >
-                  <span className="material-symbols-outlined text-on-surface-variant group-hover:scale-110 transition-transform">text_fields</span>
-                  <span className="font-ui-label text-ui-label text-on-surface-variant font-bold">Text Cell</span>
+                  <Type size={18} className="text-on-surface-variant" />
+                  <span className="font-ui-label text-[13px] text-on-surface-variant group-hover:text-on-surface transition-colors font-semibold">Text Cell</span>
                 </button>
-                <div className="h-4 w-px bg-outline-variant"></div>
+                <div className="h-5 w-px bg-outline-variant/60"></div>
                 <button 
                   onClick={clearAllCells}
-                  className="flex items-center gap-2 cursor-pointer group bg-transparent border-none text-left"
+                  className="flex items-center gap-2 cursor-pointer group bg-transparent border-none text-left px-3 py-1.5 rounded-full hover:bg-error/10 transition-all duration-200"
                 >
-                  <span className="material-symbols-outlined text-error group-hover:scale-110 transition-transform">delete</span>
-                  <span className="font-ui-label text-ui-label text-on-surface-variant font-bold">Clear All</span>
+                  <Trash2 size={18} className="text-error" />
+                  <span className="font-ui-label text-[13px] text-on-surface-variant group-hover:text-error transition-colors font-semibold">Clear All</span>
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Terminal Section */}
-          {isTerminalOpen && (
-            <div className="absolute bottom-0 left-0 right-0 z-40 flex flex-col bg-surface-container-lowest border-t border-outline-variant shadow-2xl">
-              <div className="flex items-center justify-between px-4 h-9 bg-surface-container-high border-b border-outline-variant">
-                <div className="flex items-center gap-4">
+
+        </main>
+
+        {/* Right-Hand AI Sidebar */}
+        {isAiSidebarOpen && (
+          <aside className="w-96 flex-shrink-0 bg-surface-container-lowest border-l border-outline-variant flex flex-col z-40 transition-all animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between px-5 h-14 border-b border-outline-variant/60 bg-surface-container/50 backdrop-blur-md">
+              <div className="flex items-center gap-2 text-primary">
+                <Sparkles size={18} />
+                <span className="font-ui-header text-[14px] font-bold tracking-tight">AI Assistant</span>
+              </div>
+              <button 
+                onClick={closeAiSidebar}
+                className="p-1.5 rounded-lg text-outline hover:text-on-surface hover:bg-surface-variant transition-colors"
+                title="Close AI Sidebar"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-6 scroll-smooth">
+              <div className="flex flex-col gap-2">
+                <div className="font-ui-label text-[10px] font-bold text-outline uppercase tracking-widest">Context</div>
+                <div className="px-3 py-2 bg-surface-container rounded-lg border border-outline-variant/30 flex items-center justify-between shadow-sm">
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[18px] text-on-surface-variant">terminal</span>
-                    <span className="font-ui-label text-ui-label text-on-surface-variant font-bold uppercase tracking-wider">Terminal</span>
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></div>
+                    <span className="font-code-block text-[11px] text-on-surface-variant font-medium">Cell {activeCellIdForAi}</span>
                   </div>
-                  <div className="flex items-center gap-2 px-2 py-0.5 bg-surface-container border border-outline-variant rounded cursor-pointer hover:border-primary transition-colors">
-                    <span className="font-ui-label text-[11px] text-primary">Local Shell (Next.js)</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 text-on-surface-variant">
-                  <span 
-                    className="material-symbols-outlined text-[18px] cursor-pointer hover:text-primary transition-colors"
-                    onClick={() => {
-                      setTerminalLines([
-                        { type: 'output', text: 'Terminal cleared.' }
-                      ]);
-                    }}
-                    title="Clear Console"
-                  >
-                    block
-                  </span>
-                  <span 
-                    className="material-symbols-outlined text-[18px] cursor-pointer hover:text-error transition-colors"
-                    onClick={() => setIsTerminalOpen(false)}
-                  >
-                    close
-                  </span>
+                  <span className="text-[10px] font-ui-label text-outline bg-surface-container-high px-2 py-0.5 rounded-md">Python</span>
                 </div>
               </div>
-              <div className="p-4 font-code-block text-console-text max-h-[250px] min-h-[150px] overflow-y-auto bg-surface-container-lowest select-text">
-                <div className="flex flex-col gap-1.5 font-mono text-[12px] whitespace-pre-wrap">
-                  {terminalLines.map((line, idx) => {
-                    if (line.type === 'command') {
-                      return (
-                        <div key={idx} className="flex gap-2">
-                          <span className="text-secondary font-bold shrink-0">user@collabcode:~/project$</span>
-                          <span className="text-on-surface font-semibold">{line.text}</span>
-                        </div>
-                      );
-                    } else if (line.type === 'error') {
-                      return (
-                        <div key={idx} className="text-error font-medium leading-relaxed mb-1">
-                          {line.text}
-                        </div>
-                      );
-                    } else {
-                      return (
-                        <div key={idx} className="text-on-surface-variant opacity-85 leading-relaxed mb-1">
-                          {line.text}
-                        </div>
-                      );
-                    }
-                  })}
-                  
-                  {/* Current Active Input Prompt */}
-                  <form onSubmit={handleTerminalSubmit} className="flex gap-2 items-center mt-1">
-                    <span className="text-secondary font-bold shrink-0">user@collabcode:~/project$</span>
-                    {isTerminalRunning ? (
-                      <div className="flex items-center gap-2 text-outline text-[11px]">
-                        <span className="animate-spin material-symbols-outlined text-[14px]">sync</span>
-                        <span>Running command...</span>
+
+              {/* Chat Thread */}
+              <div className="flex flex-col gap-6 flex-1">
+                {!lastQuery && !isAiLoading && !aiResponse && (
+                  <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-4 opacity-70">
+                    <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-2">
+                      <Sparkles size={24} />
+                    </div>
+                    <h3 className="font-ui-header text-[15px] text-on-surface font-semibold">How can I help?</h3>
+                    <p className="font-ui-body text-[12px] text-on-surface-variant leading-relaxed">
+                      Ask me to explain code, find bugs, or suggest performance optimizations for the active cell.
+                    </p>
+                    {/* Quick Actions */}
+                    <div className="flex flex-col w-full gap-2 mt-4">
+                      <button 
+                        onClick={() => handleAiAnalyze('Explain this code step by step')}
+                        className="flex items-center justify-between w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/40 hover:bg-primary/5 hover:border-primary/30 transition-all text-left group shadow-sm"
+                      >
+                        <span className="text-[12px] font-ui-label text-on-surface font-medium group-hover:text-primary transition-colors">Explain code</span>
+                        <Info size={14} className="text-outline group-hover:text-primary transition-colors" />
+                      </button>
+                      <button 
+                        onClick={() => handleAiAnalyze('Find any bugs or issues in this code')}
+                        className="flex items-center justify-between w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/40 hover:bg-error/5 hover:border-error/30 transition-all text-left group shadow-sm"
+                      >
+                        <span className="text-[12px] font-ui-label text-on-surface font-medium group-hover:text-error transition-colors">Check for bugs</span>
+                        <AlertCircle size={14} className="text-outline group-hover:text-error transition-colors" />
+                      </button>
+                      <button 
+                        onClick={() => handleAiAnalyze('Suggest ways to optimize this code')}
+                        className="flex items-center justify-between w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/40 hover:bg-secondary/5 hover:border-secondary/30 transition-all text-left group shadow-sm"
+                      >
+                        <span className="text-[12px] font-ui-label text-on-surface font-medium group-hover:text-secondary transition-colors">Optimize performance</span>
+                        <TrendingUp size={14} className="text-outline group-hover:text-secondary transition-colors" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {lastQuery && (
+                  <div className="self-end bg-primary text-on-primary px-4 py-3 rounded-2xl rounded-tr-sm max-w-[85%] text-[13px] font-ui-body shadow-md animate-in slide-in-from-right-2 fade-in duration-200">
+                    {lastQuery}
+                  </div>
+                )}
+
+                {(isAiLoading || aiResponse) && (
+                  <div className="flex flex-col gap-3 max-w-[95%] animate-in slide-in-from-left-2 fade-in duration-300">
+                    <div className="flex items-center gap-2 ml-1">
+                      <div className="w-6 h-6 rounded-lg bg-surface-variant flex items-center justify-center text-primary shadow-sm border border-outline-variant/50">
+                        <Sparkles size={12} />
                       </div>
-                    ) : (
-                      <input
-                        type="text"
-                        value={currentCommand}
-                        onChange={(e) => setCurrentCommand(e.target.value)}
-                        className="flex-1 bg-transparent border-none outline-none text-on-surface font-mono text-[12px] focus:ring-0 p-0"
-                        placeholder="Type command and press Enter..."
-                        autoFocus
-                      />
-                    )}
-                  </form>
-                  <div ref={terminalBottomRef} />
+                      <span className="font-ui-header text-[12px] font-semibold text-on-surface">CollabCode AI</span>
+                    </div>
+
+                    <div className="glass-panel bg-surface-container/60 border border-outline-variant/50 rounded-2xl rounded-tl-sm p-0 shadow-lg overflow-hidden flex flex-col backdrop-blur-xl">
+                      {isAiLoading ? (
+                        <div className="flex items-center gap-3 p-5">
+                          <Activity size={16} className="animate-spin text-primary" />
+                          <span className="font-ui-body text-[13px] text-on-surface-variant">Analyzing your code...</span>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Main Response Content */}
+                          <div className="p-5 prose prose-sm dark:prose-invert max-w-none font-ui-body text-[13px] text-on-surface-variant leading-relaxed prose-headings:font-ui-header prose-headings:text-on-surface prose-headings:font-semibold prose-p:my-2 prose-pre:my-4 prose-pre:bg-[#0d1117] prose-pre:border prose-pre:border-white/10 prose-pre:rounded-xl prose-pre:shadow-inner prose-pre:text-[12px] prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:font-code-block prose-code:before:content-none prose-code:after:content-none">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {aiResponse}
+                            </ReactMarkdown>
+                          </div>
+                          
+                          {/* Footer Actions */}
+                          <div className="bg-surface-container-low border-t border-outline-variant/40 px-3 py-2.5 flex items-center gap-2 overflow-x-auto">
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(aiResponse);
+                                playSound('bubble');
+                              }}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-ui-label font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors"
+                            >
+                              <Copy size={13} /> Copy
+                            </button>
+                            <div className="w-px h-3 bg-outline-variant/50"></div>
+                            <button
+                              onClick={() => handleAiAnalyze(lastQuery)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-ui-label font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors"
+                            >
+                              <Activity size={13} /> Regenerate
+                            </button>
+                            <div className="w-px h-3 bg-outline-variant/50"></div>
+                            <button
+                              onClick={() => handleAiAnalyze('Explain this answer further')}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-ui-label font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors"
+                            >
+                              <Info size={13} /> Explain
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Chat Input Footer */}
+              <div className="mt-auto pt-4 border-t border-outline-variant/30">
+                <div className="relative group">
+                  <textarea 
+                    value={aiQuery}
+                    onChange={(e) => setAiQuery(e.target.value)}
+                    placeholder="Ask a follow-up question..."
+                    className="w-full bg-surface-container border border-outline-variant/60 rounded-xl pl-4 pr-12 py-3.5 text-[13px] text-on-surface focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all resize-none shadow-sm group-hover:border-outline-variant"
+                    rows={1}
+                    style={{ minHeight: '52px', maxHeight: '150px' }}
+                    onKeyDown={(e) => { 
+                      if (e.key === 'Enter' && !e.shiftKey) { 
+                        e.preventDefault(); 
+                        handleAiAnalyze(); 
+                        setAiQuery(''); // Clear input after submit
+                      } 
+                    }}
+                  />
+                  <button 
+                    onClick={() => { handleAiAnalyze(); setAiQuery(''); }}
+                    disabled={isAiLoading || !aiQuery.trim()}
+                    className="absolute right-2 bottom-2 p-2 rounded-lg bg-primary text-on-primary disabled:opacity-50 disabled:bg-surface-variant disabled:text-outline hover:brightness-110 transition-all shadow-sm flex items-center justify-center"
+                  >
+                    <Sparkles size={16} />
+                  </button>
+                </div>
+                <div className="text-center mt-2">
+                  <span className="text-[10px] font-ui-label text-outline font-medium">AI can make mistakes. Verify code before executing.</span>
                 </div>
               </div>
             </div>
-          )}
-        </main>
+          </aside>
+        )}
       </div>
 
       {/* Utility Status Bar */}
-      <footer className="w-full h-6 bg-surface-container-lowest border-t border-outline-variant flex items-center justify-between px-4 z-50 shrink-0">
-        <div className="flex items-center gap-4 text-[10px] font-ui-label text-outline uppercase tracking-tighter">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-secondary"></span> Connected</span>
-          <span className="flex items-center gap-1">RAM: 1.2GB / 8GB</span>
-          <span className="flex items-center gap-1">GPU: Active</span>
-          <div className="h-3 w-px bg-outline-variant mx-2"></div>
-          <button 
-            className={`flex items-center gap-1 hover:text-primary transition-colors ${isTerminalOpen ? 'text-primary' : ''}`}
-            onClick={() => setIsTerminalOpen(!isTerminalOpen)}
-          >
-            <span className="material-symbols-outlined text-[14px]">terminal</span>
-            <span>Terminal</span>
-          </button>
+      <footer className="w-full h-8 bg-surface-container-low border-t border-outline-variant flex items-center justify-between px-4 z-50 shrink-0">
+        <div className="flex items-center gap-5 text-[11px] font-ui-label text-on-surface-variant font-medium">
+          <span className="flex items-center gap-2 text-secondary">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-secondary opacity-40"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-secondary"></span>
+            </span>
+            Connected
+          </span>
+          <span className="flex items-center gap-1.5"><Activity size={14} /> RAM: 1.2GB / 8GB</span>
+          <span className="flex items-center gap-1.5"><Zap size={14} className="text-amber-500" /> GPU: Active</span>
+
         </div>
-        <div className="flex items-center gap-4 text-[10px] font-ui-label text-outline">
-          <span className="">UTF-8</span>
-          <span className="">JDoodle Backend Ready</span>
-          <span className="material-symbols-outlined text-[14px] cursor-pointer hover:text-on-surface transition-colors">notifications</span>
+        <div className="flex items-center gap-4 text-[11px] font-ui-label text-on-surface-variant font-medium">
+          <span>UTF-8</span>
+          <span className="flex items-center gap-1.5"><CheckCircle2 size={14} className="text-secondary" /> JDoodle Ready</span>
+          <button className="hover:text-primary transition-colors">
+            <Bell size={14} />
+          </button>
         </div>
       </footer>
 
@@ -835,15 +1076,7 @@ export default function CollabCodeIDE() {
                         </p>
                       </div>
 
-                      <div className="p-4 bg-surface-container-low rounded-xl border border-outline-variant/40">
-                        <div className="flex items-center gap-2 text-on-surface font-bold mb-2">
-                          <span className="material-symbols-outlined text-[18px]">terminal</span>
-                          <span>Local Console</span>
-                        </div>
-                        <p className="text-[12px] text-outline">
-                          Use the terminal drawer at the bottom to execute commands and view outputs in real time.
-                        </p>
-                      </div>
+
                     </div>
 
                     <div className="p-4 bg-secondary/5 border border-secondary/20 rounded-xl">
@@ -954,10 +1187,7 @@ export default function CollabCodeIDE() {
                             <td className="p-3">Switch Theme Mode</td>
                             <td className="p-3">Click the Sun/Moon toggle icon in the header</td>
                           </tr>
-                          <tr className="border-b border-outline-variant/40">
-                            <td className="p-3">Open/Close Terminal drawer</td>
-                            <td className="p-3">Click the Terminal button in the footer bar</td>
-                          </tr>
+
                           <tr>
                             <td className="p-3">Rename Project</td>
                             <td className="p-3">Click the project title at the top left to edit</td>

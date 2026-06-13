@@ -15,7 +15,7 @@ const LANGUAGE_MAP: Record<string, string> = {
 
 export async function POST(req: Request) {
   try {
-    const { code, language = 'python3' } = await req.json();
+    const { code, language = 'python3', stdin = '' } = await req.json();
 
     const cloudRunUrl = process.env.CLOUD_RUN_URL;
     if (!cloudRunUrl) {
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
       response = await fetch(`${cloudRunUrl}/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, language: normalizedLanguage }),
+        body: JSON.stringify({ code, language: normalizedLanguage, stdin }),
         signal: controller.signal,
       });
     } finally {

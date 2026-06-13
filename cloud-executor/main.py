@@ -25,8 +25,14 @@ if os.path.exists(parent_env_path):
 
 
 app = Flask(__name__)
-# Enable CORS for all routes so the Next.js frontend can communicate with this backend
-CORS(app)
+
+# --- CORS Configuration ---
+# Restrict allowed origins so only the CollabCode frontend can call this API.
+# In production set the ALLOWED_ORIGINS env var to your frontend's domain.
+# e.g.  ALLOWED_ORIGINS=https://collabcode-frontend.run.app
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000")
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+CORS(app, origins=ALLOWED_ORIGINS)
 
 # --- Configuration ---
 JDOODLE_CLIENT_ID = os.environ.get("JDOODLE_CLIENT_ID")
@@ -63,6 +69,7 @@ def run_code():
 
     code = data.get("code", "").strip()
     language_key = data.get("language", "").lower().strip()
+    stdin_input = data.get("stdin", "")
 
     # 1. Validation for empty code
     if not code:
@@ -88,6 +95,7 @@ def run_code():
         "clientId": JDOODLE_CLIENT_ID,
         "clientSecret": JDOODLE_CLIENT_SECRET,
         "script": code,
+        "stdin": stdin_input,
         "language": config["language"],
         "versionIndex": config["versionIndex"]
     }

@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { marked } from 'marked';
+import { Edit, Eye, Trash2 } from 'lucide-react';
 
 interface TextCellProps {
   id: string;
@@ -17,7 +18,7 @@ export default function TextCell({ id, initialContent = 'Double click to edit te
   // Helper to parse markdown synchronously
   const getParsedMarkdown = () => {
     try {
-      return { __html: marked.parseSync(content) as string };
+      return { __html: marked.parse(content) as string };
     } catch (e) {
       console.error(e);
       return { __html: content };
@@ -25,7 +26,7 @@ export default function TextCell({ id, initialContent = 'Double click to edit te
   };
 
   return (
-    <div className="flex flex-col rounded-lg border border-outline-variant bg-surface-container overflow-hidden shadow-xl ring-1 ring-white/5 mb-8 transition-all hover:border-primary/50">
+    <div className="flex flex-col rounded-xl border border-outline-variant bg-surface-container overflow-hidden shadow-xl ring-1 ring-white/5 mb-0 card-hover transition-all">
       {/* Cell Header */}
       <div className="flex items-center justify-between px-4 h-10 bg-surface-container-high">
         <div className="flex items-center gap-3">
@@ -35,28 +36,26 @@ export default function TextCell({ id, initialContent = 'Double click to edit te
         <div className="flex items-center gap-2">
           <button 
             onClick={() => setIsEditing(!isEditing)}
-            className="flex items-center gap-1.5 bg-primary/20 text-primary hover:bg-primary/30 px-3 py-1 rounded-lg font-ui-label text-ui-label font-bold transition-all"
+            className="flex items-center gap-1.5 bg-primary/10 text-primary border border-primary/20 px-3 py-1.5 rounded-lg font-ui-label text-[12px] font-semibold transition-all duration-200 hover:bg-primary hover:text-on-primary hover:shadow-lg hover:shadow-primary/15"
           >
-            <span className="material-symbols-outlined text-[16px]">
-              {isEditing ? 'visibility' : 'edit'}
-            </span>
+            {isEditing ? <Eye size={14} /> : <Edit size={14} />}
             {isEditing ? 'Preview' : 'Edit'}
           </button>
           
           {onDelete && (
             <button 
               onClick={onDelete}
-              className="text-on-surface-variant hover:text-error transition-colors flex items-center p-1 rounded hover:bg-surface-variant"
+              className="text-on-surface-variant hover:text-error hover:bg-error/10 transition-all duration-200 flex items-center p-1.5 rounded-lg ml-1"
               title="Delete cell"
             >
-              <span className="material-symbols-outlined text-[18px]">delete</span>
+              <Trash2 size={16} />
             </button>
           )}
         </div>
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 p-6 bg-surface-container-lowest min-h-[100px]">
+      <div className="flex-1 p-4 bg-surface-container-lowest min-h-[80px]">
         {isEditing ? (
           <textarea
             value={content}
@@ -68,14 +67,14 @@ export default function TextCell({ id, initialContent = 'Double click to edit te
           />
         ) : content ? (
           <div 
-            className="markdown-body font-ui-body text-ui-body text-on-surface-variant leading-relaxed cursor-pointer min-h-[60px]"
+            className="markdown-body font-ui-body text-ui-body text-on-surface-variant leading-relaxed cursor-pointer min-h-[48px]"
             onDoubleClick={() => setIsEditing(true)}
             title="Double click to edit"
             dangerouslySetInnerHTML={getParsedMarkdown()}
           />
         ) : (
           <div 
-            className="markdown-body font-ui-body text-ui-body text-on-surface-variant leading-relaxed cursor-pointer min-h-[60px]"
+            className="markdown-body font-ui-body text-ui-body text-on-surface-variant leading-relaxed cursor-pointer min-h-[48px]"
             onDoubleClick={() => setIsEditing(true)}
             title="Double click to edit"
           >

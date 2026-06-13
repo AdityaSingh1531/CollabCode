@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { Play, Square, Loader2, Trash2, BrainCircuit, CheckCircle2, AlertCircle, Sparkles, Keyboard } from 'lucide-react';
 
 interface CodeCellProps {
   id: string;
@@ -9,6 +10,9 @@ interface CodeCellProps {
   onDelete?: () => void;
   onCodeChange?: (code: string) => void;
   onLanguageChange?: (language: string) => void;
+  onStdinChange?: (stdin: string) => void;
+  onAiHelper?: () => void;
+  onExecutionComplete?: (success: boolean) => void;
 }
 
 const DEFAULT_CODE: Record<string, string> = {
@@ -18,12 +22,14 @@ const DEFAULT_CODE: Record<string, string> = {
   nodejs: 'console.log("Hello from Node.js!");\nfor (let i = 0; i < 5; i++) {\n    console.log(`Counting: ${i}`);\n}'
 };
 
-export default function CodeCell({ id, initialCode = '', initialLanguage = 'python3', onDelete, onCodeChange, onLanguageChange }: CodeCellProps) {
+export default function CodeCell({ id, initialCode = '', initialLanguage = 'python3', initialStdin = '', onDelete, onCodeChange, onLanguageChange, onStdinChange, onAiHelper, onExecutionComplete }: CodeCellProps) {
   const [language, setLanguage] = useState(initialLanguage);
   const [codeContent, setCodeContent] = useState(initialCode);
   
   const [isRunning, setIsRunning] = useState(false);
   const [executionResult, setExecutionResult] = useState<any>(null);
+  const [isStdinOpen, setIsStdinOpen] = useState(!!initialStdin);
+  const [stdinContent, setStdinContent] = useState(initialStdin);
 
   const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newLang = e.target.value;
@@ -49,7 +55,8 @@ export default function CodeCell({ id, initialCode = '', initialLanguage = 'pyth
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
             code: codeContent,
-            language: language
+            language: language,
+            stdin: stdinContent
         }),
       });
       
@@ -60,52 +67,23 @@ export default function CodeCell({ id, initialCode = '', initialLanguage = 'pyth
       
       const data = await res.json();
       setExecutionResult(data);
+      if (data.status === 'Accepted' && !data.error && !data.stderr) {
+        onExecutionComplete?.(true);
+      } else {
+        onExecutionComplete?.(false);
+      }
     } catch (err: any) {
       setExecutionResult({ error: err.message || 'Network error occurred. Ensure the backend is running on port 8080.' });
+      onExecutionComplete?.(false);
     } finally {
       setIsRunning(false);
     }
   };
 
-  const [isAiOpen, setIsAiOpen] = useState(false);
-  const [aiQuery, setAiQuery] = useState('');
-  const [aiResponse, setAiResponse] = useState('');
-  const [isAiLoading, setIsAiLoading] = useState(false);
-
-  const handleAiAnalyze = async (customPrompt?: string) => {
-    const promptToSend = customPrompt || aiQuery;
-    if (!promptToSend.trim() && !customPrompt) return;
-    
-    setIsAiLoading(true);
-    setAiResponse('');
-    try {
-      const res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code: codeContent,
-          language,
-          prompt: promptToSend
-        })
-      });
-      
-      if (!res.ok) {
-        throw new Error(`API error: ${res.status}`);
-      }
-      
-      const data = await res.json();
-      setAiResponse(data.response);
-    } catch (err: any) {
-      setAiResponse(`❌ Error generating response: ${err.message || 'Unknown network error'}`);
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
   return (
-    <div className="flex flex-col rounded-lg border border-outline-variant bg-surface-container overflow-hidden shadow-xl ring-1 ring-white/5 mb-8">
+    <div className="flex flex-col rounded-xl border border-outline-variant bg-surface-container overflow-hidden shadow-xl ring-1 ring-white/5 mb-0 card-hover transition-all">
       {/* Cell Header */}
-      <div className="flex items-center justify-between px-4 h-10 bg-surface-container-high">
+      <div className="flex items-center justify-between px-4 h-11 bg-surface-container-high border-b border-outline-variant/30">
         <div className="flex items-center gap-3">
           <span className="text-outline font-code-bold text-[11px]">[{id}]</span>
           
@@ -113,57 +91,66 @@ export default function CodeCell({ id, initialCode = '', initialLanguage = 'pyth
           <select 
             value={language}
             onChange={handleLanguageChange}
-            className="bg-surface-variant border border-outline-variant rounded px-2 py-1 text-ui-label font-ui-label text-on-surface focus:outline-none focus:border-primary transition-colors cursor-pointer"
+            className="bg-surface-variant border border-outline-variant rounded-lg px-2.5 py-1 text-ui-label font-ui-label text-on-surface hover:border-primary/55 hover:bg-surface-variant/90 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/25 transition-all cursor-pointer font-semibold duration-200"
           >
             <option value="python3">Python 3</option>
             <option value="cpp17">C++ 17</option>
             <option value="java">Java</option>
             <option value="nodejs">Node.js</option>
           </select>
-
-          <div className="flex gap-1.5 ml-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500/50"></span>
-            <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/50"></span>
-            <span className="w-2.5 h-2.5 rounded-full bg-green-500/50"></span>
-          </div>
         </div>
         <div className="flex items-center gap-2">
           {/* AI Helper Toggle */}
           <button
-            onClick={() => setIsAiOpen(!isAiOpen)}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg font-ui-label text-ui-label font-bold transition-all ${isAiOpen ? 'bg-primary text-on-primary' : 'bg-primary/20 text-primary hover:bg-primary/30'}`}
+            onClick={onAiHelper}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-ui-label text-[12px] font-semibold text-primary bg-primary/10 border border-primary/20 hover:bg-primary hover:text-on-primary transition-all duration-200 shadow-sm"
             title="Ask AI Helper"
           >
-            <span className="material-symbols-outlined text-[18px]">psychology</span>
+            <Sparkles size={14} />
             <span>AI Helper</span>
+          </button>
+ 
+          <button
+            onClick={() => setIsStdinOpen(!isStdinOpen)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-ui-label text-[12px] font-semibold transition-all duration-200 shadow-sm ${
+              isStdinOpen 
+                ? 'bg-surface-variant text-on-surface border border-outline-variant/60' 
+                : 'text-on-surface-variant hover:bg-surface-variant border border-transparent hover:border-outline-variant/30'
+            }`}
+            title="Provide Standard Input (stdin)"
+          >
+            <Keyboard size={14} />
+            <span>Input</span>
           </button>
 
           <button 
             onClick={handleRun}
             disabled={isRunning}
-            className={`flex items-center gap-1.5 bg-secondary text-on-secondary px-3 py-1 rounded-lg font-ui-label text-ui-label font-bold transition-all ${isRunning ? 'opacity-70 cursor-not-allowed' : 'hover:brightness-110 active:scale-95'}`}
+            data-run-btn="true"
+            className={`flex items-center gap-1.5 bg-secondary text-on-secondary border border-secondary/25 px-4 py-1.5 rounded-lg font-ui-label text-[12px] font-semibold transition-all duration-200 shadow-md shadow-secondary/20 hover:brightness-110 active:scale-95 ${
+              isRunning ? 'opacity-70 cursor-not-allowed' : ''
+            }`}
           >
-            <span className="material-symbols-outlined text-[18px]" style={{fontVariationSettings: "'FILL' 1"}}>
-              {isRunning ? 'hourglass_empty' : 'play_arrow'}
-            </span>
+            {isRunning ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} fill="currentColor" />}
             {isRunning ? 'Running...' : 'Run'}
           </button>
           
           {onDelete && (
             <button 
               onClick={onDelete}
-              className="text-on-surface-variant hover:text-error transition-colors flex items-center p-1 rounded hover:bg-surface-variant"
+              className="text-on-surface-variant hover:text-error hover:bg-error/10 transition-all duration-200 flex items-center p-1.5 rounded-lg ml-1"
               title="Delete cell"
             >
-              <span className="material-symbols-outlined text-[18px]">delete</span>
+              <Trash2 size={16} />
             </button>
           )}
         </div>
       </div>
       {/* Editor Content */}
-      <div className="flex">
+      <div className="flex bg-surface-container-lowest relative">
+        <div className="absolute inset-0 bg-gradient-to-b from-surface-container/20 to-transparent pointer-events-none"></div>
         {/* Line Numbers */}
-        <div className="w-10 bg-surface-container-high/30 py-4 flex flex-col items-center font-code-block text-outline opacity-50 select-none border-r border-outline-variant/30">
+        <div className="w-12 bg-surface-container-high/20 py-4 flex flex-col items-center font-code-block text-outline opacity-50 select-none border-r border-outline-variant/30">
           {codeContent.split('\n').map((_, i) => (
             <div key={i}>{i + 1}</div>
           ))}
@@ -180,110 +167,66 @@ export default function CodeCell({ id, initialCode = '', initialLanguage = 'pyth
         </div>
       </div>
 
-      {/* AI Helper Panel */}
-      {isAiOpen && (
-        <div className="border-t border-outline-variant bg-surface-container-low p-5 flex flex-col gap-4">
+      {/* Standard Input Area */}
+      {isStdinOpen && (
+        <div className="bg-surface-container-low border-t border-outline-variant/40 p-3 flex flex-col gap-2">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-primary">
-              <span className="material-symbols-outlined text-[20px]">insights</span>
-              <span className="font-ui-header text-[13px] font-bold uppercase tracking-wider">AI Assistant Context Analyser</span>
-            </div>
-            <button 
-              onClick={() => { setAiResponse(''); setAiQuery(''); }}
-              className="text-outline hover:text-on-surface text-[11px] font-ui-label"
-            >
-              Clear Conversation
-            </button>
+            <span className="font-ui-label text-[10px] uppercase tracking-wider text-outline font-semibold flex items-center gap-1.5">
+              <Keyboard size={12} /> Standard Input (stdin)
+            </span>
           </div>
-
-          {/* Quick Prompts */}
-          <div className="flex flex-wrap gap-2">
-            <button 
-              onClick={() => handleAiAnalyze('Explain this code')}
-              className="px-3 py-1 rounded bg-surface border border-outline-variant hover:border-primary transition-colors text-[11px] font-ui-label text-on-surface-variant"
-            >
-              📖 Explain
-            </button>
-            <button 
-              onClick={() => handleAiAnalyze('Check for bugs or issues')}
-              className="px-3 py-1 rounded bg-surface border border-outline-variant hover:border-error transition-colors text-[11px] font-ui-label text-on-surface-variant"
-            >
-              🪲 Bug Check
-            </button>
-            <button 
-              onClick={() => handleAiAnalyze('Optimize performance')}
-              className="px-3 py-1 rounded bg-surface border border-outline-variant hover:border-secondary transition-colors text-[11px] font-ui-label text-on-surface-variant"
-            >
-              ⚡ Optimize
-            </button>
-          </div>
-
-          {/* Prompt Entry Input */}
-          <div className="flex gap-2">
-            <input 
-              type="text"
-              value={aiQuery}
-              onChange={(e) => setAiQuery(e.target.value)}
-              placeholder="Ask anything about this specific code block..."
-              className="flex-1 bg-surface border border-outline-variant rounded-lg px-3 py-2 text-[12px] text-on-surface focus:outline-none focus:border-primary"
-              onKeyDown={(e) => { if (e.key === 'Enter') handleAiAnalyze(); }}
-            />
-            <button 
-              onClick={() => handleAiAnalyze()}
-              disabled={isAiLoading}
-              className="bg-primary text-on-primary px-4 py-2 rounded-lg text-[12px] font-bold hover:brightness-110 active:scale-95 disabled:opacity-50 transition-all flex items-center gap-1"
-            >
-              {isAiLoading ? 'Analyzing...' : 'Ask'}
-            </button>
-          </div>
-
-          {/* AI Helper Response Container */}
-          {(aiResponse || isAiLoading) && (
-            <div className="bg-surface-container-highest border border-outline-variant rounded-lg p-4 font-ui-body text-ui-body text-on-surface-variant whitespace-pre-wrap leading-relaxed animate-in max-h-[300px] overflow-y-auto">
-              {isAiLoading ? (
-                <div className="flex items-center gap-2 text-primary">
-                  <span className="material-symbols-outlined text-[16px] animate-spin">sync</span>
-                  <span className="font-ui-label text-[12px]">Analyzing cell context &amp; formatting answer...</span>
-                </div>
-              ) : (
-                aiResponse
-              )}
-            </div>
-          )}
+          <textarea
+            value={stdinContent}
+            onChange={(e) => {
+              setStdinContent(e.target.value);
+              onStdinChange?.(e.target.value);
+            }}
+            placeholder="Type input here (e.g., for Python input() or C++ std::cin)..."
+            className="w-full bg-surface-container border border-outline-variant/40 rounded-lg p-2.5 text-[12px] font-console-text text-on-surface focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all resize-y min-h-[60px]"
+            spellCheck={false}
+          />
         </div>
       )}
 
       {/* Output Console */}
-      <div className="bg-surface-container-lowest border-t border-outline-variant p-6 min-h-[120px]">
+      <div className="bg-surface-container-lowest border-t border-outline-variant p-4 min-h-[80px]">
         {isRunning ? (
           <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-outline text-[16px] animate-spin">sync</span>
-            <span className="font-console-text text-console-text text-outline/80">Executing code on JDoodle...</span>
+            <Loader2 size={16} className="text-outline animate-spin" />
+            <span className="font-console-text text-console-text text-outline/80 text-[11px]">Executing code on JDoodle...</span>
           </div>
         ) : executionResult ? (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <span className={`material-symbols-outlined text-[16px] ${executionResult.stderr || executionResult.error || executionResult.status !== 'Accepted' ? 'text-error' : 'text-secondary'}`}>
-                {executionResult.stderr || executionResult.error || executionResult.status !== 'Accepted' ? 'error' : 'check_circle'}
-              </span>
-              <span className={`font-console-text text-console-text ${executionResult.stderr || executionResult.error || executionResult.status !== 'Accepted' ? 'text-error/80' : 'text-secondary/80'}`}>
-                {executionResult.error ? executionResult.error : `${executionResult.status || 'Accepted'} ${executionResult.time ? `(Time: ${executionResult.time}s, Mem: ${executionResult.memory}KB)` : ''}`}
-              </span>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {executionResult.stderr || executionResult.error || executionResult.status !== 'Accepted' ? (
+                  <AlertCircle size={15} className="text-error" />
+                ) : (
+                  <CheckCircle2 size={15} className="text-secondary" />
+                )}
+                <span className={`font-console-text text-[11px] ${executionResult.stderr || executionResult.error || executionResult.status !== 'Accepted' ? 'text-error/80' : 'text-secondary/80'}`}>
+                  {executionResult.error ? executionResult.error : `${executionResult.status || 'Accepted'} ${executionResult.time ? `(Time: ${executionResult.time}s, Mem: ${executionResult.memory}KB)` : ''}`}
+                </span>
+              </div>
+              <span className="font-ui-label text-[9px] text-outline uppercase tracking-wider">Output</span>
             </div>
             {executionResult.stdout && (
-              <pre className="font-console-text text-console-text text-on-surface whitespace-pre-wrap mt-2">{executionResult.stdout}</pre>
+              <pre className="font-console-text text-[12px] text-on-surface whitespace-pre-wrap mt-1">{executionResult.stdout}</pre>
             )}
             {executionResult.stderr && (
-              <pre className="font-console-text text-console-text text-error whitespace-pre-wrap mt-2">{executionResult.stderr}</pre>
+              <pre className="font-console-text text-[12px] text-error whitespace-pre-wrap mt-1">{executionResult.stderr}</pre>
             )}
             {executionResult.compile_output && (
-              <pre className="font-console-text text-console-text text-error whitespace-pre-wrap mt-2">{executionResult.compile_output}</pre>
+              <pre className="font-console-text text-[12px] text-error whitespace-pre-wrap mt-1">{executionResult.compile_output}</pre>
             )}
           </div>
         ) : (
-          <div className="flex items-center gap-2 text-outline/50">
-            <span className="material-symbols-outlined text-[16px]">info</span>
-            <span className="font-console-text text-console-text">Output will appear here...</span>
+          <div className="flex items-center justify-between text-outline/50">
+            <div className="flex items-center gap-2">
+              <BrainCircuit size={15} />
+              <span className="font-console-text text-[11px]">Console ready...</span>
+            </div>
+            <span className="font-ui-label text-[9px] uppercase tracking-wider">Output</span>
           </div>
         )}
       </div>
