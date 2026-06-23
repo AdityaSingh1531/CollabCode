@@ -4,21 +4,82 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useTheme } from '@/components/ThemeProvider';
 import CodeCell from '@/components/CodeCell';
 import TextCell from '@/components/TextCell';
-import { Share2, Settings, UserCircle, Sun, Moon, HelpCircle, FilePlus, CheckCircle2, Activity, Zap, Bell, PlusCircle, Type, Trash2, X, Copy, Sparkles, AlertCircle, TrendingUp, Maximize2, Info, PlayCircle, Save } from 'lucide-react';
+import { Share2, Settings, UserCircle, Sun, Moon, HelpCircle, FilePlus, CheckCircle2, Activity, Zap, Bell, Trash2, X, Copy, Sparkles, AlertCircle, TrendingUp, Maximize2, Info, Play, Save } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import InsertBar from '@/components/InsertBar';
+import FocusMusicWidget from '@/components/FocusMusicWidget';
+import LoginModal from '@/components/LoginModal';
+import DataSourcesSidebar from '@/components/DataSourcesSidebar';
 
 export default function CollabCodeIDE() {
   const { isDark, toggleTheme } = useTheme();
+
+  // ── Auth state ─────────────────────────────────────────────────────────────
+  interface UserProfile { id: string; username: string; displayName: string; createdAt: string; }
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    setCurrentUser(null);
+    setIsProfileMenuOpen(false);
+  };
 
   // State for title
   const [title, setTitle] = useState("Data Analysis v1");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
 
+  // ── Data Sources sidebar state ──────────────────────────────────────────────
+  const [activeCellId, setActiveCellId] = useState<string | null>(null);
+  // Map from cellId → injected stdin string (keyed by a counter so re-injection always triggers useEffect)
+  const [injectedStdins, setInjectedStdins] = useState<Record<string, { content: string; tick: number }>>({});
+
+  const handleInjectData = (content: string) => {
+    const targetId = activeCellId ?? cells.find(c => c.type === 'code')?.id ?? null;
+    if (!targetId) return;
+    setInjectedStdins(prev => ({
+      ...prev,
+      [targetId]: { content, tick: (prev[targetId]?.tick ?? 0) + 1 },
+    }));
+  };
+
   // State for notebook cells
-  const [cells, setCells] = useState<Array<{ id: string; type: 'code' | 'text'; language?: string; code?: string; content?: string; stdin?: string }>>([    { id: '1', type: 'code', language: 'python3', code: '', stdin: '' },
+  const [cells, setCells] = useState<Array<{ id: string; type: 'code' | 'text'; language?: string; code?: string; content?: string; stdin?: string }>>([
+    { id: '1', type: 'code', language: 'python3', code: '', stdin: '' },
     { id: '2', type: 'code', language: 'nodejs', code: '', stdin: '' }
   ]);
+
+  const [hasHydrated, setHasHydrated] = useState(false);
+
+  // Load from localStorage + check auth on mount
+  useEffect(() => {
+    const savedTitle = localStorage.getItem('collabcode_title');
+    if (savedTitle) setTitle(savedTitle);
+
+    const savedCells = localStorage.getItem('collabcode_cells');
+    if (savedCells) {
+      try {
+        const parsed = JSON.parse(savedCells);
+        if (Array.isArray(parsed) && parsed.length > 0) setCells(parsed);
+      } catch (e) {
+        console.error('Failed to parse saved cells:', e);
+      }
+    }
+    setHasHydrated(true);
+
+    // Check if user is already logged in via HttpOnly session cookie
+    fetch('/api/auth/me')
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          setCurrentUser(data.user);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setAuthChecked(true));
+  }, []);
 
   // Ref for the notebook canvas area (for screenshot)
   const notebookRef = useRef<HTMLDivElement>(null);
@@ -28,7 +89,11 @@ export default function CollabCodeIDE() {
 
   // State for share dropdown visibility
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [runAllTrigger, setRunAllTrigger] = useState(0);
   const shareRef = useRef<HTMLDivElement>(null);
+
+  // State for localStorage auto-save status
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'idle'>('saved');
 
   // State for import modal
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -39,12 +104,6 @@ export default function CollabCodeIDE() {
 
   // Audio instances ref for preloading to prevent lag
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({});
-
-  // --- Persistence & Run All state ---
-  const [showSavedToast, setShowSavedToast] = useState(false);
-  const [cellRunTriggers, setCellRunTriggers] = useState<Record<string, number>>({});
-  const [runAllQueue, setRunAllQueue] = useState<string[]>([]);
-  const [isRunningAll, setIsRunningAll] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [loadingText, setLoadingText] = useState('Initializing compiler environments...');
 
@@ -119,17 +178,17 @@ export default function CollabCodeIDE() {
     }
   }, []);
 
-  // Global Button Click Sound (excluding Run button)
+  // Global Button Click Sound (excluding Run button and no-sound zones)
   useEffect(() => {
     const handleGlobalClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      // Play bubble sound if a button or something acting like a button is clicked
+      // Skip if inside a no-sound zone (e.g. Focus Music widget)
+      if (target.closest('[data-no-sound="true"]')) return;
       const button = target.closest('button') || target.closest('[role="button"]') || (target.tagName.toLowerCase() === 'button' ? target : null);
       if (button) {
-        // Exclude Run button
         if (
-          button.getAttribute('data-run-btn') === 'true' || 
-          button.textContent?.trim() === 'Run' || 
+          button.getAttribute('data-run-btn') === 'true' ||
+          button.textContent?.trim() === 'Run' ||
           button.textContent?.trim() === 'Running...'
         ) {
           return;
@@ -199,54 +258,25 @@ export default function CollabCodeIDE() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
-  // LocalStorage: load saved notebook when app finishes loading
+  // Save title to localStorage on change
   useEffect(() => {
-    if (!isLoaded) return;
-    try {
-      const saved = localStorage.getItem('collabcode-notebook');
-      if (saved) {
-        const { cells: savedCells, title: savedTitle } = JSON.parse(saved);
-        if (Array.isArray(savedCells) && savedCells.length > 0) setCells(savedCells);
-        if (savedTitle) setTitle(savedTitle);
-      }
-    } catch (e) {
-      console.warn('Could not restore notebook from localStorage:', e);
+    if (hasHydrated) {
+      setSaveStatus('saving');
+      localStorage.setItem('collabcode_title', title);
+      const timer = setTimeout(() => setSaveStatus('saved'), 800);
+      return () => clearTimeout(timer);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoaded]);
+  }, [title, hasHydrated]);
 
-  // LocalStorage: debounced auto-save on every cells/title change
+  // Save cells to localStorage on change
   useEffect(() => {
-    if (!isLoaded) return;
-    const timer = setTimeout(() => {
-      try {
-        localStorage.setItem('collabcode-notebook', JSON.stringify({ cells, title }));
-        setShowSavedToast(true);
-        setTimeout(() => setShowSavedToast(false), 2000);
-      } catch (e) {
-        console.warn('Auto-save failed:', e);
-      }
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [cells, title, isLoaded]);
-
-  // Ctrl+S → force-save immediately
-  useEffect(() => {
-    const handleCtrlS = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        try {
-          localStorage.setItem('collabcode-notebook', JSON.stringify({ cells, title }));
-          setShowSavedToast(true);
-          setTimeout(() => setShowSavedToast(false), 2000);
-        } catch (e) {
-          console.warn('Save failed:', e);
-        }
-      }
-    };
-    document.addEventListener('keydown', handleCtrlS);
-    return () => document.removeEventListener('keydown', handleCtrlS);
-  }, [cells, title]);
+    if (hasHydrated) {
+      setSaveStatus('saving');
+      localStorage.setItem('collabcode_cells', JSON.stringify(cells));
+      const timer = setTimeout(() => setSaveStatus('saved'), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [cells, hasHydrated]);
 
   const addCodeCell = () => {
     const newId = Date.now().toString();
@@ -256,6 +286,78 @@ export default function CollabCodeIDE() {
   const addTextCell = () => {
     const newId = Date.now().toString();
     setCells([...cells, { id: newId, type: 'text', content: '' }]);
+  };
+
+  // Insert cell at a specific index
+  const addCodeCellAt = useCallback((atIdx: number) => {
+    const newId = Date.now().toString();
+    setCells(prev => {
+      const next = [...prev];
+      next.splice(atIdx, 0, { id: newId, type: 'code', language: 'python3', code: '', stdin: '' });
+      return next;
+    });
+  }, []);
+
+  const addTextCellAt = useCallback((atIdx: number) => {
+    const newId = Date.now().toString();
+    setCells(prev => {
+      const next = [...prev];
+      next.splice(atIdx, 0, { id: newId, type: 'text', content: '' });
+      return next;
+    });
+  }, []);
+
+  // Drag-and-drop reordering state
+  const dragCellIdRef = useRef<string | null>(null);
+  const [dragOverCellId, setDragOverCellId] = useState<string | null>(null);
+
+  const handleDragStart = useCallback((cellId: string) => (e: React.DragEvent) => {
+    dragCellIdRef.current = cellId;
+    e.dataTransfer.effectAllowed = 'move';
+    const target = (e.target as HTMLElement).closest('.collabcode-cell');
+    if (target) {
+      e.dataTransfer.setDragImage(target as Element, 20, 20);
+      setTimeout(() => {
+        (target as HTMLElement).style.opacity = '0.4';
+      }, 0);
+    }
+  }, []);
+
+  const handleDragEnd = useCallback(() => (e: React.DragEvent) => {
+    dragCellIdRef.current = null;
+    setDragOverCellId(null);
+    const target = (e.target as HTMLElement).closest('.collabcode-cell');
+    if (target) {
+      (target as HTMLElement).style.opacity = '1';
+    }
+  }, []);
+
+  const handleDragOver = useCallback((cellId: string) => (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverCellId(cellId);
+  }, []);
+
+  const handleDrop = useCallback((targetCellId: string) => (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverCellId(null);
+    const fromId = dragCellIdRef.current;
+    dragCellIdRef.current = null;
+    if (!fromId || fromId === targetCellId) return;
+    setCells(prev => {
+      const fromIdx = prev.findIndex(c => c.id === fromId);
+      const toIdx   = prev.findIndex(c => c.id === targetCellId);
+      if (fromIdx === -1 || toIdx === -1) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      return next;
+    });
+  }, []);
+
+  // Run all cells handler
+  const runAllCells = () => {
+    setRunAllTrigger(prev => prev + 1);
   };
 
   const deleteCell = (id: string) => {
@@ -284,54 +386,6 @@ export default function CollabCodeIDE() {
   const handleTextContentChange = useCallback((id: string, content: string) => {
     setCells(prev => prev.map(c => c.id === id ? { ...c, content } : c));
   }, []);
-
-  // --- Cell Reorder ---
-  const moveCellUp = useCallback((id: string) => {
-    setCells(prev => {
-      const idx = prev.findIndex(c => c.id === id);
-      if (idx <= 0) return prev;
-      const next = [...prev];
-      [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
-      return next;
-    });
-  }, []);
-
-  const moveCellDown = useCallback((id: string) => {
-    setCells(prev => {
-      const idx = prev.findIndex(c => c.id === id);
-      if (idx >= prev.length - 1) return prev;
-      const next = [...prev];
-      [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
-      return next;
-    });
-  }, []);
-
-  // --- Run All Cells (sequential via onExecutionComplete queue) ---
-  const handleRunAll = useCallback(() => {
-    const codeCellIds = cells.filter(c => c.type === 'code').map(c => c.id);
-    if (codeCellIds.length === 0) return;
-    setIsRunningAll(true);
-    const [first, ...rest] = codeCellIds;
-    setRunAllQueue(rest);
-    setCellRunTriggers(prev => ({ ...prev, [first]: (prev[first] || 0) + 1 }));
-  }, [cells]);
-
-  // Called when any cell completes execution
-  const handleCellExecutionComplete = useCallback((cellId: string, success: boolean) => {
-    if (success) playSound('correct');
-    else playSound('error');
-    // Advance Run All queue
-    setRunAllQueue(prev => {
-      if (prev.length === 0) {
-        setIsRunningAll(false);
-        return [];
-      }
-      const [next, ...rest] = prev;
-      setCellRunTriggers(t => ({ ...t, [next]: (t[next] || 0) + 1 }));
-      if (rest.length === 0) setIsRunningAll(false);
-      return rest;
-    });
-  }, [playSound]);
 
   // --- Share: PNG screenshot (using html-to-image – avoids oklab parse errors from Tailwind v4) ---
   const handleExportPng = async () => {
@@ -554,17 +608,8 @@ export default function CollabCodeIDE() {
 
         {/* Content container */}
         <div className="z-10 flex flex-col items-center gap-6 max-w-sm text-center px-6">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center shadow-xl shadow-primary/20 animate-bounce">
-            <Sparkles size={32} className="text-white" strokeWidth={2.5} />
-          </div>
-          
-          <div className="flex flex-col gap-2">
-            <h1 className="font-ui-header text-[26px] font-bold tracking-tight bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-              CollabCode
-            </h1>
-            <p className="font-ui-label text-[13px] text-outline/80 font-medium tracking-wide">
-              POWERFUL COLLABORATIVE IDE
-            </p>
+          <div className="w-72 h-72 rounded-2xl overflow-hidden shadow-xl shadow-primary/20 animate-bounce">
+            <img src="/logo.jpg" alt="Logo" className="w-full h-full object-cover" />
           </div>
 
           {/* Glowing loader bar */}
@@ -586,8 +631,8 @@ export default function CollabCodeIDE() {
       <header className="flex items-center justify-between w-full h-12 px-4 bg-surface-container/90 backdrop-blur-md border-b border-outline-variant shrink-0 z-50">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary">
-              <Sparkles size={16} strokeWidth={2.5} />
+            <div className="flex items-center justify-center w-7 h-7 rounded-lg overflow-hidden border border-outline-variant/30 bg-[#070c1b]">
+              <img src="/collabcode-logo.jpg" alt="Logo" className="w-full h-full object-contain p-0.5" />
             </div>
             <span className="font-ui-header text-[15px] font-bold text-on-surface tracking-tight">CollabCode</span>
             <div className="h-5 w-px bg-outline-variant mx-1"></div>
@@ -615,19 +660,23 @@ export default function CollabCodeIDE() {
             {['File', 'Edit', 'View', 'Runtime', 'Tools'].map(item => (
               <span key={item} className="font-ui-label text-[12px] text-on-surface-variant font-medium cursor-pointer hover:bg-surface-variant hover:text-on-surface px-2.5 py-1 rounded-md transition-all duration-200">{item}</span>
             ))}
-            <span 
+            {/* Help – icon-only expandable */}
+            <button
               onClick={() => setIsHelpOpen(true)}
-              className="font-ui-label text-[12px] text-primary font-medium cursor-pointer hover:bg-primary/10 px-2.5 py-1 rounded-md transition-all duration-200 flex items-center gap-1.5 ml-1"
+              title="Help"
+              className="group relative flex items-center justify-center h-7 rounded-md text-primary hover:bg-primary/10 transition-all duration-200 overflow-hidden px-2 max-w-[28px] hover:max-w-[90px] hover:px-3 ml-1 border border-transparent hover:border-primary/20"
             >
-              <HelpCircle size={14} />
-              Help
-            </span>
+              <HelpCircle size={14} className="shrink-0" />
+              <span className="w-0 opacity-0 group-hover:w-auto group-hover:opacity-100 transition-all duration-200 whitespace-nowrap overflow-hidden ml-0 group-hover:ml-1.5 text-[11px] font-semibold">Help</span>
+            </button>
+            {/* Insert – icon-only expandable */}
             <button
               onClick={() => { handleFileInputClick(); fileInputRef.current?.click(); }}
-              className="font-ui-label text-[12px] text-on-surface-variant font-medium cursor-pointer hover:bg-surface-variant hover:text-on-surface px-2.5 py-1 rounded-md transition-all duration-200 flex items-center gap-1.5"
+              title="Import JSON"
+              className="group relative flex items-center justify-center h-7 rounded-md text-on-surface-variant hover:bg-surface-variant hover:text-on-surface transition-all duration-200 overflow-hidden px-2 max-w-[28px] hover:max-w-[90px] hover:px-3 border border-transparent hover:border-outline-variant/30"
             >
-              <FilePlus size={14} />
-              Insert
+              <FilePlus size={14} className="shrink-0" />
+              <span className="w-0 opacity-0 group-hover:w-auto group-hover:opacity-100 transition-all duration-200 whitespace-nowrap overflow-hidden ml-0 group-hover:ml-1.5 text-[11px] font-semibold">Insert</span>
             </button>
             <input
               ref={fileInputRef}
@@ -639,14 +688,15 @@ export default function CollabCodeIDE() {
           </nav>
         </div>
         <div className="flex items-center gap-3">
-          {/* Share Dropdown */}
+          {/* Share Dropdown – icon-only expandable */}
           <div className="relative" ref={shareRef}>
             <button
               onClick={() => setIsShareOpen(!isShareOpen)}
-              className="bg-primary text-on-primary font-ui-label text-[12px] px-3.5 py-1.5 rounded-lg transition-all duration-200 font-semibold flex items-center gap-1.5 hover:brightness-110 active:brightness-95 shadow-sm shadow-primary/20"
+              title="Share / Export"
+              className="group relative flex items-center justify-center h-8 rounded-lg bg-primary text-on-primary transition-all duration-200 overflow-hidden px-2.5 max-w-[34px] hover:max-w-[110px] hover:px-3.5 font-semibold shadow-sm shadow-primary/20 hover:brightness-110 active:brightness-95"
             >
-              <Share2 size={14} />
-              Share
+              <Share2 size={14} className="shrink-0" />
+              <span className="w-0 opacity-0 group-hover:w-auto group-hover:opacity-100 transition-all duration-200 whitespace-nowrap overflow-hidden ml-0 group-hover:ml-1.5 text-[11px] font-bold uppercase tracking-wide">Share</span>
             </button>
             {isShareOpen && (
               <div className="absolute right-0 top-full mt-2 w-64 glass-panel rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in duration-150">
@@ -675,8 +725,29 @@ export default function CollabCodeIDE() {
           </div>
           <div className="h-5 w-px bg-outline-variant/60 mx-1"></div>
           <div className="flex items-center gap-1 text-on-surface-variant">
+            {/* LocalStorage / Auto-Save Indicator Button */}
+            <button
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  setSaveStatus('saving');
+                  localStorage.setItem('collabcode_cells', JSON.stringify(cells));
+                  localStorage.setItem('collabcode_title', title);
+                  setTimeout(() => {
+                    setSaveStatus('saved');
+                    playSound('correct');
+                  }, 500);
+                }
+              }}
+              className="group relative flex items-center justify-center h-8 rounded-lg bg-surface-variant hover:bg-primary/10 active:bg-primary/20 text-on-surface-variant hover:text-primary transition-all duration-300 overflow-hidden px-2 hover:px-3 active:px-3 max-w-[32px] hover:max-w-[170px] active:max-w-[170px] border border-outline-variant/30 shrink-0"
+              title="Save status (LocalStorage)"
+            >
+              <Save size={16} className={`shrink-0 ${saveStatus === 'saving' ? 'animate-bounce text-primary' : 'text-secondary'}`} />
+              <span className="w-0 opacity-0 group-hover:w-auto group-hover:opacity-100 group-active:w-auto group-active:opacity-100 transition-all duration-300 ease-out whitespace-nowrap overflow-hidden ml-0 group-hover:ml-2 group-active:ml-2 text-[11px] font-semibold">
+                {saveStatus === 'saving' ? 'Saving...' : 'Auto-Saved to Local'}
+              </span>
+            </button>
             <button 
-              className="p-1.5 rounded-md hover:bg-surface-variant hover:text-primary transition-colors"
+              className="p-1.5 rounded-md hover:bg-surface-variant hover:text-primary transition-colors shrink-0"
               onClick={toggleTheme}
               title="Toggle Theme"
             >
@@ -685,94 +756,125 @@ export default function CollabCodeIDE() {
             <button className="p-1.5 rounded-md hover:bg-surface-variant hover:text-primary transition-colors" title="Settings">
               <Settings size={18} />
             </button>
-            <button className="p-1.5 rounded-md hover:bg-surface-variant hover:text-primary transition-colors" title="Profile">
-              <UserCircle size={20} />
-            </button>
+            {/* Profile + Logout Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setIsProfileMenuOpen((v) => !v)}
+                className="w-8 h-8 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center text-primary font-bold text-xs hover:bg-primary/30 transition-colors"
+                title={currentUser ? `${currentUser.displayName} (@${currentUser.username})` : 'Profile'}
+              >
+                {currentUser
+                  ? currentUser.displayName.charAt(0).toUpperCase()
+                  : <UserCircle size={18} />}
+              </button>
+              {isProfileMenuOpen && (
+                <div
+                  onMouseLeave={() => setIsProfileMenuOpen(false)}
+                  className="absolute right-0 top-10 w-52 bg-surface-container-highest border border-outline-variant rounded-xl shadow-2xl z-50 overflow-hidden"
+                >
+                  {currentUser && (
+                    <div className="px-4 py-3 border-b border-outline-variant/40">
+                      <p className="font-semibold text-sm text-on-surface truncate">{currentUser.displayName}</p>
+                      <p className="text-[11px] text-outline truncate">@{currentUser.username}</p>
+                    </div>
+                  )}
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-error hover:bg-error/10 transition-colors"
+                  >
+                    <X size={14} />
+                    Sign Out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>
 
       {/* Sidebar & Main Content */}
       <div className="flex flex-1 overflow-hidden relative">
-      {/* Main Workspace Canvas */}
+        {/* Data Sources Sidebar */}
+        <DataSourcesSidebar onInject={handleInjectData} />
+
+        {/* Main Workspace Canvas */}
         <main className="flex-1 flex flex-col bg-background overflow-y-auto scroll-smooth relative">
           <div ref={notebookRef} className="max-w-5xl mx-auto w-full p-6 flex flex-col pb-16">
             
-            {/* Render Reusable Code and Text Cells */}
-            <div id="notebook-cells" className="flex flex-col gap-5 mb-0">
-              {cells.map((cell, cellIdx) => {
-                if (cell.type === 'code') {
-                  return (
-                      <CodeCell 
-                        key={cell.id} 
-                        id={cell.id} 
-                        initialCode={cell.code}
-                        initialLanguage={cell.language} 
-                        initialStdin={cell.stdin}
-                        onDelete={() => deleteCell(cell.id)}
-                        onCodeChange={(code) => handleCodeChange(cell.id, code)}
-                        onLanguageChange={(lang) => handleLanguageChange(cell.id, lang)}
-                        onStdinChange={(stdin) => handleStdinChange(cell.id, stdin)}
-                        onAiHelper={() => handleOpenAiSidebar(cell.id)}
-                        onExecutionComplete={(success) => handleCellExecutionComplete(cell.id, success)}
-                        onMoveUp={() => moveCellUp(cell.id)}
-                        onMoveDown={() => moveCellDown(cell.id)}
-                        isFirst={cellIdx === 0}
-                        isLast={cellIdx === cells.length - 1}
-                        runTrigger={cellRunTriggers[cell.id] || 0}
-                      />
-                  );
-                } else {
-                  return (
-                    <TextCell 
-                      key={cell.id} 
+            {/* Render Cells with drag-and-drop and between-cell insert */}
+            <div
+              id="notebook-cells"
+              className="flex flex-col gap-0 mb-0"
+              onDragLeave={() => setDragOverCellId(null)}
+            >
+              {/* Insert bar above first cell */}
+              <InsertBar onAddCode={() => addCodeCellAt(0)} onAddText={() => addTextCellAt(0)} />
+
+              {cells.map((cell, idx) => (
+                <React.Fragment key={cell.id}>
+                  {cell.type === 'code' ? (
+                    <CodeCell
+                      id={cell.id}
+                      initialCode={cell.code}
+                      initialLanguage={cell.language}
+                      initialStdin={cell.stdin}
+                      injectedStdin={
+                        injectedStdins[cell.id]
+                          ? `${injectedStdins[cell.id].content}\u0000tick:${injectedStdins[cell.id].tick}`
+                          : undefined
+                      }
+                      onFocus={() => setActiveCellId(cell.id)}
+                      onDelete={() => deleteCell(cell.id)}
+                      onCodeChange={(code) => handleCodeChange(cell.id, code)}
+                      onLanguageChange={(lang) => handleLanguageChange(cell.id, lang)}
+                      onStdinChange={(stdin) => handleStdinChange(cell.id, stdin)}
+                      onAiHelper={() => handleOpenAiSidebar(cell.id)}
+                      onExecutionComplete={(success) => { if (success) playSound('correct'); else playSound('error'); }}
+                      runAllTrigger={runAllTrigger}
+                      onDragStart={handleDragStart(cell.id)}
+                      onDragEnd={handleDragEnd()}
+                      onDragOver={handleDragOver(cell.id)}
+                      onDrop={handleDrop(cell.id)}
+                      isDragOver={dragOverCellId === cell.id}
+                    />
+                  ) : (
+                    <TextCell
                       id={cell.id}
                       initialContent={cell.content}
                       onDelete={() => deleteCell(cell.id)}
                       onContentChange={(content) => handleTextContentChange(cell.id, content)}
+                      onDragStart={handleDragStart(cell.id)}
+                      onDragEnd={handleDragEnd()}
+                      onDragOver={handleDragOver(cell.id)}
+                      onDrop={handleDrop(cell.id)}
+                      isDragOver={dragOverCellId === cell.id}
                     />
-                  );
-                }
-              })}
+                  )}
+                  {/* Insert bar between/after each cell */}
+                  <InsertBar onAddCode={() => addCodeCellAt(idx + 1)} onAddText={() => addTextCellAt(idx + 1)} />
+                </React.Fragment>
+              ))}
             </div>
 
-            {/* Floating Toolbar for Actions */}
-            <div className="flex justify-center mt-5">
-              <div className="bg-surface-container-highest/85 backdrop-blur-md border border-outline-variant/60 rounded-full px-5 py-2 flex items-center gap-4 shadow-2xl transition-all duration-300">
-                <button 
-                  onClick={addCodeCell}
-                  className="flex items-center gap-2 cursor-pointer group bg-transparent border-none text-left px-3 py-1.5 rounded-full hover:bg-primary/10 transition-all duration-200"
-                >
-                  <PlusCircle size={18} className="text-primary" />
-                  <span className="font-ui-label text-[13px] text-on-surface-variant group-hover:text-primary transition-colors font-semibold">Code Cell</span>
-                </button>
-                <div className="h-5 w-px bg-outline-variant/60"></div>
-                <button 
-                  onClick={addTextCell}
-                  className="flex items-center gap-2 cursor-pointer group bg-transparent border-none text-left px-3 py-1.5 rounded-full hover:bg-surface-variant transition-all duration-200"
-                >
-                  <Type size={18} className="text-on-surface-variant" />
-                  <span className="font-ui-label text-[13px] text-on-surface-variant group-hover:text-on-surface transition-colors font-semibold">Text Cell</span>
-                </button>
-                <div className="h-5 w-px bg-outline-variant/60"></div>
+            {/* Bottom Toolbar – Clear All & Run All */}
+            <div className="flex justify-center mt-6">
+              <div className="bg-surface-container-highest/85 backdrop-blur-md border border-outline-variant/60 rounded-full px-5 py-2 flex items-center gap-4 shadow-2xl">
                 <button
-                  onClick={handleRunAll}
-                  disabled={isRunningAll || cells.filter(c => c.type === 'code').length === 0}
-                  className="flex items-center gap-2 cursor-pointer group bg-transparent border-none text-left px-3 py-1.5 rounded-full hover:bg-secondary/10 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Run all code cells sequentially"
-                >
-                  <PlayCircle size={18} className={`${isRunningAll ? 'text-secondary animate-pulse' : 'text-secondary'}`} />
-                  <span className="font-ui-label text-[13px] text-on-surface-variant group-hover:text-secondary transition-colors font-semibold">
-                    {isRunningAll ? 'Running All...' : 'Run All'}
-                  </span>
-                </button>
-                <div className="h-5 w-px bg-outline-variant/60"></div>
-                <button 
                   onClick={clearAllCells}
-                  className="flex items-center gap-2 cursor-pointer group bg-transparent border-none text-left px-3 py-1.5 rounded-full hover:bg-error/10 transition-all duration-200"
+                  className="group relative flex items-center justify-center h-9 rounded-full bg-transparent hover:bg-error/10 text-on-surface-variant hover:text-error transition-all duration-200 overflow-hidden px-2.5 max-w-[36px] hover:max-w-[130px] hover:px-4 border border-transparent hover:border-error/25 shrink-0"
+                  title="Clear all cells"
                 >
-                  <Trash2 size={18} className="text-error" />
-                  <span className="font-ui-label text-[13px] text-on-surface-variant group-hover:text-error transition-colors font-semibold">Clear All</span>
+                  <Trash2 size={17} className="shrink-0" />
+                  <span className="w-0 opacity-0 group-hover:w-auto group-hover:opacity-100 transition-all duration-200 whitespace-nowrap overflow-hidden ml-0 group-hover:ml-2 text-[12px] font-semibold">Clear All</span>
+                </button>
+                <div className="h-5 w-px bg-outline-variant/60" />
+                <button
+                  onClick={runAllCells}
+                  className="group relative flex items-center justify-center h-9 rounded-full bg-transparent hover:bg-secondary/10 text-on-surface-variant hover:text-secondary transition-all duration-200 overflow-hidden px-2.5 max-w-[36px] hover:max-w-[130px] hover:px-4 border border-transparent hover:border-secondary/25 shrink-0"
+                  title="Run all cells"
+                >
+                  <Play size={17} className="shrink-0 text-secondary" />
+                  <span className="w-0 opacity-0 group-hover:w-auto group-hover:opacity-100 transition-all duration-200 whitespace-nowrap overflow-hidden ml-0 group-hover:ml-2 text-[12px] font-semibold text-secondary">Run All</span>
                 </button>
               </div>
             </div>
@@ -946,12 +1048,6 @@ export default function CollabCodeIDE() {
         )}
       </div>
 
-      {/* Auto-save Toast */}
-      <div className={`fixed bottom-12 right-4 z-[200] flex items-center gap-2 bg-surface-container-highest border border-outline-variant/60 px-3 py-2 rounded-lg shadow-lg text-[12px] font-ui-label text-on-surface transition-all duration-300 ${showSavedToast ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'}`}>
-        <Save size={13} className="text-secondary" />
-        <span>Notebook saved</span>
-      </div>
-
       {/* Utility Status Bar */}
       <footer className="w-full h-8 bg-surface-container-low border-t border-outline-variant flex items-center justify-between px-4 z-50 shrink-0">
         <div className="flex items-center gap-5 text-[11px] font-ui-label text-on-surface-variant font-medium">
@@ -969,9 +1065,6 @@ export default function CollabCodeIDE() {
         <div className="flex items-center gap-4 text-[11px] font-ui-label text-on-surface-variant font-medium">
           <span>UTF-8</span>
           <span className="flex items-center gap-1.5"><CheckCircle2 size={14} className="text-secondary" /> JDoodle Ready</span>
-          <span className="flex items-center gap-1 text-outline/60" title="Ctrl+S to save">
-            <Save size={12} /> Auto-saved
-          </span>
           <button className="hover:text-primary transition-colors">
             <Bell size={14} />
           </button>
@@ -1345,6 +1438,12 @@ export default function CollabCodeIDE() {
             </div>
           </div>
         </div>
+      )}
+      <FocusMusicWidget />
+
+      {/* Auth Gate — blocks the IDE until user is authenticated */}
+      {authChecked && !currentUser && (
+        <LoginModal onAuthenticated={(user) => setCurrentUser(user)} />
       )}
     </div>
   );

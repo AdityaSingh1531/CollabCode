@@ -1,0 +1,63 @@
+# =============================================================================
+# Render Blueprint — CollabCode
+# =============================================================================
+# Deploy everything with one click:
+#   Render Dashboard → New → Blueprint → connect this repo
+# Services defined:
+#   1. collabcode-db         — PostgreSQL database (persistent)
+#   2. collabcode-executor   — Python/Flask code execution API
+#   3. collabcode-frontend   — Next.js SSR application
+# =============================================================================
+
+databases:
+  - name: collabcode-db
+    plan: free               # Render free tier Postgres (90 day retention; upgrade for prod)
+    databaseName: collabcode
+    user: collabcode
+
+services:
+  # ─── 1. Code Executor (Python Flask + Gunicorn) ────────────────────────────
+  - type: web
+    name: collabcode-executor
+    runtime: python
+    rootDir: cloud-executor
+    plan: free
+    buildCommand: pip install -r requirements.txt gunicorn==21.2.0
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 30 main:app
+    envVars:
+      - key: JDOODLE_CLIENT_ID
+        sync: false           # Will be set manually in the Render Dashboard
+      - key: JDOODLE_CLIENT_SECRET
+        sync: false           # Will be set manually in the Render Dashboard
+      - key: ALLOWED_ORIGINS
+        # The frontend service URL — Render generates this automatically.
+        # You can update this after the first deploy.
+        value: https://collabcode-frontend.onrender.com
+    healthCheckPath: /health
+
+  # ─── 2. Next.js Frontend ───────────────────────────────────────────────────
+  - type: web
+    name: collabcode-frontend
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: node .next/standalone/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: collabcode-db
+          property: connectionString
+      - key: CLOUD_RUN_URL
+        # The executor service URL — update after first deploy to use the
+        # internal URL: https://collabcode-executor.onrender.com
+        value: https://collabcode-executor.onrender.com
+      - key: MISTRAL_API_KEY
+        sync: false           # Will be set manually in the Render Dashboard
+      - key: JDOODLE_CLIENT_ID
+        sync: false           # Will be set manually in the Render Dashboard
+      - key: JDOODLE_CLIENT_SECRET
+        sync: false           # Will be set manually in the Render Dashboard
+      - key: PORT
+        value: 3000
