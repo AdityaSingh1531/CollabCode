@@ -43,7 +43,7 @@ services:
     name: collabcode-frontend
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: node .next/standalone/server.js
     envVars:
       - key: NODE_ENV
