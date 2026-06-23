@@ -1,96 +1,67 @@
 import { NextResponse } from 'next/server';
 
-// Map frontend language dropdown tokens → JDoodle language keys & version indices
-const LANGUAGE_MAP: Record<string, { language: string; versionIndex: string }> = {
-  python:     { language: 'python3', versionIndex: '4' },
-  python3:    { language: 'python3', versionIndex: '4' },
-  javascript: { language: 'nodejs',  versionIndex: '4' },
-  nodejs:     { language: 'nodejs',  versionIndex: '4' },
-  js:         { language: 'nodejs',  versionIndex: '4' },
-  cpp:        { language: 'cpp17',   versionIndex: '1' },
-  cpp17:      { language: 'cpp17',   versionIndex: '1' },
-  'c++':      { language: 'cpp17',   versionIndex: '1' },
-  java:       { language: 'java',    versionIndex: '4' },
-  sql:        { language: 'sql',     versionIndex: '4' },
-  mysql:      { language: 'sql',     versionIndex: '4' },
-};
+/**
+ * Proxy to the dedicated code execution service (collabcode-executor).
+ * The executor holds the JDoodle credentials — the frontend never needs them.
+ */
 
-const JDOODLE_API_URL = 'https://api.jdoodle.com/v1/execute';
+// Map frontend language tokens → executor's expected keys
+const LANGUAGE_ALIASES: Record<string, string> = {
+  python:     'python3',
+  python3:    'python3',
+  javascript: 'nodejs',
+  nodejs:     'nodejs',
+  js:         'nodejs',
+  cpp:        'cpp17',
+  cpp17:      'cpp17',
+  'c++':      'cpp17',
+  java:       'java',
+};
 
 export async function POST(req: Request) {
   try {
     const { code, language = 'python3', stdin = '' } = await req.json();
 
-    const clientId     = process.env.JDOODLE_CLIENT_ID;
-    const clientSecret = process.env.JDOODLE_CLIENT_SECRET;
-
-    if (!clientId || !clientSecret) {
-      return NextResponse.json(
-        { error: 'JDoodle API credentials are not configured. Add JDOODLE_CLIENT_ID and JDOODLE_CLIENT_SECRET to your .env file.' },
-        { status: 500 }
-      );
-    }
-
     if (!code || !code.trim()) {
       return NextResponse.json({ error: 'No code provided.' }, { status: 400 });
     }
 
-    const langConfig = LANGUAGE_MAP[language.toLowerCase()] ?? LANGUAGE_MAP['python3'];
+    const executorUrl = process.env.CLOUD_RUN_URL;
+    if (!executorUrl) {
+      return NextResponse.json(
+        { error: 'Execution service URL is not configured (CLOUD_RUN_URL).' },
+        { status: 500 }
+      );
+    }
 
-    const controller  = new AbortController();
-    const serverTimeout = setTimeout(() => controller.abort(), 15000);
+    const normalizedLanguage = LANGUAGE_ALIASES[language.toLowerCase()] ?? 'python3';
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000);
 
     let response: Response;
-    const fetchStart = performance.now();
     try {
-      response = await fetch(JDOODLE_API_URL, {
-        method:  'POST',
+      response = await fetch(`${executorUrl}/run`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientId,
-          clientSecret,
-          script:       code,
-          stdin:        stdin || '',
-          language:     langConfig.language,
-          versionIndex: langConfig.versionIndex,
-        }),
+        body: JSON.stringify({ code, language: normalizedLanguage, stdin }),
         signal: controller.signal,
       });
     } finally {
-      clearTimeout(serverTimeout);
+      clearTimeout(timeout);
     }
-    const fetchEnd = performance.now();
-    const fetchDurationSec = parseFloat(((fetchEnd - fetchStart) / 1000).toFixed(2));
 
     if (!response.ok) {
       const errText = await response.text();
       return NextResponse.json(
-        { error: `JDoodle API returned an error (${response.status}): ${errText}` },
+        { error: `Executor error (${response.status}): ${errText}` },
         { status: response.status }
       );
     }
 
+    // Executor already returns { stdout, stderr, exit_code, status, time, memory }
     const result = await response.json();
-
-    // JDoodle response shape: { output, statusCode, memory, cpuTime }
-    const stdout    = result.output ?? '';
-    const exitCode  = result.statusCode ?? 200;
-    const cpuTime   = result.cpuTime !== null && result.cpuTime !== undefined ? parseFloat(result.cpuTime) : fetchDurationSec;
-    const memory    = result.memory    ?? null;
-
-    // Heuristic: JDoodle mixes stdout + stderr into "output"
-    const lowerOut  = stdout.toLowerCase();
-    const hasError  = lowerOut.includes('error') || lowerOut.includes('exception') || lowerOut.includes('traceback');
-    const status    = hasError ? 'Error' : 'Accepted';
-
-    return NextResponse.json({
-      stdout,
-      stderr:   '',
-      exit_code: exitCode,
-      status,
-      time:   cpuTime,
-      memory,
-    });
+    return NextResponse.json(result);
 
   } catch (err: any) {
     if (err?.name === 'AbortError') {
