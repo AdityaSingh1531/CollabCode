@@ -1,3 +1,4 @@
+
 # =============================================================================
 # Render Blueprint — CollabCode
 # =============================================================================
@@ -7,13 +8,25 @@
 #   1. collabcode-db         — PostgreSQL database (persistent)
 #   2. collabcode-executor   — Python/Flask code execution API
 #   3. collabcode-frontend   — Next.js SSR application
+#
+# Shared secrets (entered once):
+#   jdoodle-credentials      — JDOODLE_CLIENT_ID + JDOODLE_CLIENT_SECRET
 # =============================================================================
 
 databases:
   - name: collabcode-db
-    plan: free               # Render free tier Postgres (90 day retention; upgrade for prod)
+    plan: free               # Render free tier Postgres (upgrade for prod)
     databaseName: collabcode
     user: collabcode
+
+# ─── Shared secret group — enter JDoodle keys once, used by both services ────
+envVarGroups:
+  - name: jdoodle-credentials
+    envVars:
+      - key: JDOODLE_CLIENT_ID
+        sync: false
+      - key: JDOODLE_CLIENT_SECRET
+        sync: false
 
 services:
   # ─── 1. Code Executor (Python Flask + Gunicorn) ────────────────────────────
@@ -22,16 +35,12 @@ services:
     runtime: python
     rootDir: cloud-executor
     plan: free
-    buildCommand: pip install -r requirements.txt gunicorn==21.2.0
+    buildCommand: pip install -r requirements.txt
     startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 30 main:app
+    envVarGroups:
+      - jdoodle-credentials           # ← pulls JDOODLE_CLIENT_ID/SECRET from the group
     envVars:
-      - key: JDOODLE_CLIENT_ID
-        sync: false           # Will be set manually in the Render Dashboard
-      - key: JDOODLE_CLIENT_SECRET
-        sync: false           # Will be set manually in the Render Dashboard
       - key: ALLOWED_ORIGINS
-        # The frontend service URL — Render generates this automatically.
-        # You can update this after the first deploy.
         value: https://collabcode-frontend.onrender.com
     healthCheckPath: /health
 
@@ -42,6 +51,8 @@ services:
     plan: free
     buildCommand: npm ci && npm run build
     startCommand: node .next/standalone/server.js
+    envVarGroups:
+      - jdoodle-credentials           # ← same group, no duplicate entry needed
     envVars:
       - key: NODE_ENV
         value: production
@@ -50,14 +61,9 @@ services:
           name: collabcode-db
           property: connectionString
       - key: CLOUD_RUN_URL
-        # The executor service URL — update after first deploy to use the
-        # internal URL: https://collabcode-executor.onrender.com
         value: https://collabcode-executor.onrender.com
       - key: MISTRAL_API_KEY
-        sync: false           # Will be set manually in the Render Dashboard
-      - key: JDOODLE_CLIENT_ID
-        sync: false           # Will be set manually in the Render Dashboard
-      - key: JDOODLE_CLIENT_SECRET
-        sync: false           # Will be set manually in the Render Dashboard
+        sync: false
       - key: PORT
         value: 3000
+
