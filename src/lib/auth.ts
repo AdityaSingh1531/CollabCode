@@ -27,11 +27,54 @@ function hashPassword(password: string, username: string): string {
   return result;
 }
 
+// ─── Mock Database fallback for local development without Postgres ──────────
+interface MockUser {
+  id: string;
+  username: string;
+  displayName: string;
+  hashed_password: string;
+  createdAt: string;
+}
+
+const globalRef = global as any;
+if (!globalRef.mockDb) {
+  globalRef.mockDb = {
+    users: new Map<string, MockUser>(),
+    sessions: new Map<string, string>(), // token -> userId
+  };
+}
+const mockDb = globalRef.mockDb;
+const useMock = !process.env.DATABASE_URL;
+
 // ─── User operations ─────────────────────────────────────────────────────────
 
 export async function createUser(username: string, password: string, displayName: string): Promise<UserProfile | null> {
-  await initDb();
   const cleanUsername = username.toLowerCase();
+  
+  if (useMock) {
+    for (const u of mockDb.users.values()) {
+      if (u.username === cleanUsername) {
+        return null;
+      }
+    }
+    const userId = randomUUID();
+    const newUser: MockUser = {
+      id: userId,
+      username: cleanUsername,
+      displayName: displayName.trim().slice(0, 40),
+      hashed_password: hashPassword(password, cleanUsername),
+      createdAt: new Date().toISOString(),
+    };
+    mockDb.users.set(userId, newUser);
+    return {
+      id: newUser.id,
+      username: newUser.username,
+      displayName: newUser.displayName,
+      createdAt: newUser.createdAt,
+    };
+  }
+
+  await initDb();
   const hashedPassword = hashPassword(password, cleanUsername);
   const userId = randomUUID();
 
@@ -60,8 +103,24 @@ export async function createUser(username: string, password: string, displayName
 }
 
 export async function verifyUser(username: string, password: string): Promise<UserProfile | null> {
-  await initDb();
   const cleanUsername = username.toLowerCase();
+
+  if (useMock) {
+    const hashedPassword = hashPassword(password, cleanUsername);
+    for (const u of mockDb.users.values()) {
+      if (u.username === cleanUsername && u.hashed_password === hashedPassword) {
+        return {
+          id: u.id,
+          username: u.username,
+          displayName: u.displayName,
+          createdAt: u.createdAt,
+        };
+      }
+    }
+    return null;
+  }
+
+  await initDb();
   const hashedPassword = hashPassword(password, cleanUsername);
 
   try {
@@ -90,6 +149,17 @@ export async function verifyUser(username: string, password: string): Promise<Us
 }
 
 export async function getUserById(id: string): Promise<UserProfile | null> {
+  if (useMock) {
+    const u = mockDb.users.get(id);
+    if (!u) return null;
+    return {
+      id: u.id,
+      username: u.username,
+      displayName: u.displayName,
+      createdAt: u.createdAt,
+    };
+  }
+
   await initDb();
   try {
     const query = `
@@ -117,6 +187,12 @@ export async function getUserById(id: string): Promise<UserProfile | null> {
 // ─── Session operations ───────────────────────────────────────────────────────
 
 export async function createSession(userId: string): Promise<string> {
+  if (useMock) {
+    const token = randomUUID();
+    mockDb.sessions.set(token, userId);
+    return token;
+  }
+
   await initDb();
   const token = randomUUID();
   try {
@@ -133,6 +209,19 @@ export async function createSession(userId: string): Promise<string> {
 }
 
 export async function resolveSession(token: string): Promise<UserProfile | null> {
+  if (useMock) {
+    const userId = mockDb.sessions.get(token);
+    if (!userId) return null;
+    const u = mockDb.users.get(userId);
+    if (!u) return null;
+    return {
+      id: u.id,
+      username: u.username,
+      displayName: u.displayName,
+      createdAt: u.createdAt,
+    };
+  }
+
   await initDb();
   try {
     const query = `
@@ -159,6 +248,11 @@ export async function resolveSession(token: string): Promise<UserProfile | null>
 }
 
 export async function destroySession(token: string): Promise<void> {
+  if (useMock) {
+    mockDb.sessions.delete(token);
+    return;
+  }
+
   await initDb();
   try {
     const query = `
