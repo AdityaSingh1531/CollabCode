@@ -100,7 +100,7 @@ export default function CollabCodeIDE() {
   const [pendingImportCells, setPendingImportCells] = useState<Array<{ id: string; type: 'code' | 'text'; language?: string; code?: string; content?: string; stdin?: string }>>([]);
   const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
-  const [activeHelpTab, setActiveHelpTab] = useState<'overview' | 'ai' | 'share' | 'shortcuts'>('overview');
+  const [activeHelpTab, setActiveHelpTab] = useState<'overview' | 'ai' | 'data-sources' | 'share' | 'shortcuts'>('overview');
 
   // Audio instances ref for preloading to prevent lag
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement }>({});
@@ -1206,6 +1206,17 @@ export default function CollabCodeIDE() {
                     <span>AI Code Assistant</span>
                   </button>
                   <button
+                    onClick={() => setActiveHelpTab('data-sources')}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-ui-label text-[13px] font-semibold text-left transition-all whitespace-nowrap ${
+                      activeHelpTab === 'data-sources'
+                        ? 'bg-primary text-on-primary shadow-md shadow-primary/20'
+                        : 'text-on-surface-variant hover:bg-surface-variant'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-[18px]">database</span>
+                    <span>Data & Stdin</span>
+                  </button>
+                  <button
                     onClick={() => setActiveHelpTab('share')}
                     className={`flex items-center gap-3 px-3 py-2.5 rounded-xl font-ui-label text-[13px] font-semibold text-left transition-all whitespace-nowrap ${
                       activeHelpTab === 'share'
@@ -1245,6 +1256,7 @@ export default function CollabCodeIDE() {
                 <h3 className="font-ui-header text-on-surface font-bold text-base uppercase tracking-wider">
                   {activeHelpTab === 'overview' && 'Workspace & Core Features'}
                   {activeHelpTab === 'ai' && 'AI Code Analyser & Helper'}
+                  {activeHelpTab === 'data-sources' && 'Data Sources & Stdin Injection'}
                   {activeHelpTab === 'share' && 'Share, PNG & JSON Functions'}
                   {activeHelpTab === 'shortcuts' && 'Keyboard Shortcuts & Dev Tips'}
                 </h3>
@@ -1271,7 +1283,7 @@ export default function CollabCodeIDE() {
                           <span>Run Code Cells</span>
                         </div>
                         <p className="text-[12px] text-outline">
-                          Write Python or JavaScript scripts in code cells. Click the play button next to the cell to run code and view output instantly.
+                          Write Python, JavaScript, C++, or Java scripts in code cells. Click the play button next to the cell to run code and view output instantly.
                         </p>
                       </div>
 
@@ -1287,15 +1299,23 @@ export default function CollabCodeIDE() {
 
                       <div className="p-4 bg-surface-container-low rounded-xl border border-outline-variant/40">
                         <div className="flex items-center gap-2 text-tertiary font-bold mb-2">
-                          <span className="material-symbols-outlined text-[18px]">palette</span>
-                          <span>Change Theme</span>
+                          <span className="material-symbols-outlined text-[18px]">drag_indicator</span>
+                          <span>Drag-and-Drop Reordering</span>
                         </div>
                         <p className="text-[12px] text-outline">
-                          Toggle between Solarized Light and Space Dark modes using the theme switcher icon in the top right.
+                          Reorder your analysis notebook easily by grabbing any cell handler and dragging it to your desired position.
                         </p>
                       </div>
 
-
+                      <div className="p-4 bg-surface-container-low rounded-xl border border-outline-variant/40">
+                        <div className="flex items-center gap-2 text-primary font-bold mb-2">
+                          <span className="material-symbols-outlined text-[18px]">music_note</span>
+                          <span>Focus Music</span>
+                        </div>
+                        <p className="text-[12px] text-outline">
+                          Access ambient lofi tracks via the Focus Music Widget floating in the bottom-left corner of the workspace.
+                        </p>
+                      </div>
                     </div>
 
                     <div className="p-4 bg-secondary/5 border border-secondary/20 rounded-xl">
@@ -1350,7 +1370,47 @@ export default function CollabCodeIDE() {
                   </div>
                 )}
 
-                {activeHelpTab === 'share' && (
+                  {activeHelpTab === 'data-sources' && (
+                    <div className="flex flex-col gap-5 animate-in fade-in duration-200">
+                      <p>
+                        CollabCode allows you to bind external inputs directly to code runtime environments.
+                      </p>
+                      
+                      <div className="flex flex-col gap-4">
+                        <div className="p-4 bg-surface-container-low rounded-xl border border-outline-variant/40">
+                          <div className="flex items-center gap-2 text-primary font-semibold mb-1">
+                            <span className="material-symbols-outlined text-[18px]">upload</span>
+                            <span>File Upload</span>
+                          </div>
+                          <p className="text-[12px] text-outline leading-relaxed">
+                            Drag or click inside the File Upload area in the <strong>Data Sources</strong> sidebar to upload <code>.csv</code>, <code>.txt</code>, or custom logs.
+                          </p>
+                        </div>
+
+                        <div className="p-4 bg-surface-container-low rounded-xl border border-outline-variant/40">
+                          <div className="flex items-center gap-2 text-secondary font-semibold mb-1">
+                            <span className="material-symbols-outlined text-[18px]">link</span>
+                            <span>Google Sheets CSV Import</span>
+                          </div>
+                          <p className="text-[12px] text-outline leading-relaxed">
+                            Paste a Google Sheet URL (shared publicly as 'Anyone with the link can view'). The workspace will fetch its contents and parse it dynamically as a local CSV source.
+                          </p>
+                        </div>
+
+                        <div className="p-4 bg-surface-container-low rounded-xl border border-outline-variant/40">
+                          <div className="flex items-center gap-2 text-tertiary font-semibold mb-1">
+                            <span className="material-symbols-outlined text-[18px]">input</span>
+                            <span>Stdin Injection</span>
+                          </div>
+                          <p className="text-[12px] text-outline leading-relaxed">
+                            Click <strong>"Inject into active cell"</strong> on any added source. The next execution run of the target code cell will consume the file content as its <code>stdin</code> input.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeHelpTab === 'share' && (
                   <div className="flex flex-col gap-5 animate-in fade-in duration-200">
                     <p>
                       Share your findings and save/load your workspace sessions seamlessly.

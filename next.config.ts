@@ -4,6 +4,7 @@ const nextConfig: NextConfig = {
   // Produces a self-contained server bundle in .next/standalone
   // Required for Docker / Cloud Run deployment without node_modules
   output: "standalone",
+  devIndicators: false,
 };
 
 export default nextConfig;
