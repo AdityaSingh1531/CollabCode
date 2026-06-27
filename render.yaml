@@ -36,11 +36,11 @@ services:
       - key: JDOODLE_CLIENT_SECRET
         sync: false
       - key: ALLOWED_ORIGINS
-        value: https://collabcode-frontend.onrender.com
+        value: https://collabcode.onrender.com
 
   # ─── 2. Next.js Frontend ───────────────────────────────────────────────────
   - type: web
-    name: collabcode-frontend
+    name: collabcode
     runtime: node
     plan: free
     buildCommand: npm ci --include=dev && npm run build
