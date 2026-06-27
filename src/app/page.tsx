@@ -1048,28 +1048,7 @@ export default function CollabCodeIDE() {
         )}
       </div>
 
-      {/* Utility Status Bar */}
-      <footer className="w-full h-8 bg-surface-container-low border-t border-outline-variant flex items-center justify-between px-4 z-50 shrink-0">
-        <div className="flex items-center gap-5 text-[11px] font-ui-label text-on-surface-variant font-medium">
-          <span className="flex items-center gap-2 text-secondary">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-secondary opacity-40"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-secondary"></span>
-            </span>
-            Connected
-          </span>
-          <span className="flex items-center gap-1.5"><Activity size={14} /> RAM: 1.2GB / 8GB</span>
-          <span className="flex items-center gap-1.5"><Zap size={14} className="text-amber-500" /> GPU: Active</span>
 
-        </div>
-        <div className="flex items-center gap-4 text-[11px] font-ui-label text-on-surface-variant font-medium">
-          <span>UTF-8</span>
-          <span className="flex items-center gap-1.5"><CheckCircle2 size={14} className="text-secondary" /> JDoodle Ready</span>
-          <button className="hover:text-primary transition-colors">
-            <Bell size={14} />
-          </button>
-        </div>
-      </footer>
 
       {/* Import Mode Modal */}
       {importModalOpen && (
