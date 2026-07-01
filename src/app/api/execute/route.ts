@@ -37,8 +37,7 @@ export async function POST(req: Request) {
     const normalizedLanguage = LANGUAGE_ALIASES[language.toLowerCase()] ?? 'python3';
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20_000);
-
+    const timeout = setTimeout(() => controller.abort(), 60_000); // 60s to allow Render free tier to wake up from sleep
     let response: Response;
     try {
       response = await fetch(`${executorUrl}/run`, {
