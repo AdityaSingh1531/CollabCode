@@ -199,6 +199,8 @@ export default function CollabCodeIDE() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [loadingText, setLoadingText] = useState('Initializing compiler environments...');
 
+  const { isDark, toggleTheme, isMuted, toggleMute } = useTheme();
+
   // Set up loop for Pop sound during loading
   useEffect(() => {
     let popAudio: HTMLAudioElement | null = null;
@@ -208,7 +210,9 @@ export default function CollabCodeIDE() {
       popAudio = new Audio('/Sound-eff/Pop1_Pop2_pop3.mp3.mpeg');
       popAudio.loop = true;
       popAudio.volume = 0.4;
-      popAudio.play().catch(e => console.log('Autoplay pop sound blocked:', e));
+      if (!isMuted) {
+        popAudio.play().catch(e => console.log('Autoplay pop sound blocked:', e));
+      }
 
       // Cycle loading messages for rich UX
       const texts = [
@@ -239,7 +243,7 @@ export default function CollabCodeIDE() {
         popAudio.pause();
       }
     };
-  }, [isLoaded]);
+  }, [isLoaded, isMuted]);
 
   useEffect(() => {
     // Preload audio files on mount
@@ -255,7 +259,6 @@ export default function CollabCodeIDE() {
     }
   }, []);
 
-  const { isDark, toggleTheme, isMuted, toggleMute } = useTheme();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Sound effects logic
