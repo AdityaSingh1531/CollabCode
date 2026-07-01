@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
+import { useTheme } from '@/components/ThemeProvider';
 import {
   Play, Loader2, Trash2, BrainCircuit, CheckCircle2, AlertCircle,
-  Sparkles, Keyboard, Copy, Check, GripVertical
+  Sparkles, Keyboard, Copy, Check, GripVertical, Lightbulb
 } from 'lucide-react';
 
 /* ── Language map ─────────────────────────────────────────────── */
@@ -16,44 +17,88 @@ const MONACO_LANG: Record<string, string> = {
   sql:      'sql',
 };
 
-/* ── Custom theme (registered once) ──────────────────────────── */
-let themeRegistered = false;
-function registerTheme(monaco: any) {
-  if (themeRegistered) return;
-  themeRegistered = true;
-  monaco.editor.defineTheme('collabcode-dark', {
+/* ── Monaco theme names ───────────────────────────────────────── */
+const DARK_THEME  = 'collabcode-dark';
+const LIGHT_THEME = 'collabcode-solarized';
+
+/* ── Register both themes once ────────────────────────────────── */
+let themesRegistered = false;
+function registerThemes(monaco: any) {
+  if (themesRegistered) return;
+  themesRegistered = true;
+
+  /* Dark theme */
+  monaco.editor.defineTheme(DARK_THEME, {
     base: 'vs-dark',
     inherit: true,
     rules: [
-      { token: 'comment',    foreground: '6b7db3', fontStyle: 'italic' },
-      { token: 'keyword',    foreground: 'c792ea' },
-      { token: 'string',     foreground: 'c3e88d' },
-      { token: 'number',     foreground: 'f78c6c' },
-      { token: 'type',       foreground: '82aaff' },
-      { token: 'function',   foreground: '82aaff' },
-      { token: 'variable',   foreground: 'eeffff' },
-      { token: 'delimiter',  foreground: '89ddff' },
+      { token: 'comment',   foreground: '6b7db3', fontStyle: 'italic' },
+      { token: 'keyword',   foreground: 'c792ea' },
+      { token: 'string',    foreground: 'c3e88d' },
+      { token: 'number',    foreground: 'f78c6c' },
+      { token: 'type',      foreground: '82aaff' },
+      { token: 'function',  foreground: '82aaff' },
+      { token: 'variable',  foreground: 'eeffff' },
+      { token: 'delimiter', foreground: '89ddff' },
     ],
     colors: {
-      'editor.background':               '#0d111a',
-      'editor.foreground':               '#cdd6f4',
-      'editorLineNumber.foreground':     '#3a4157',
-      'editorLineNumber.activeForeground': '#7c87aa',
-      'editor.selectionBackground':      '#3b82f626',
-      'editor.inactiveSelectionBackground': '#3b82f614',
-      'editor.lineHighlightBackground':  '#161c2a',
-      'editor.lineHighlightBorder':      '#1e2740',
-      'editorCursor.foreground':         '#82aaff',
-      'editorIndentGuide.background':    '#1e2740',
-      'editorIndentGuide.activeBackground': '#3b4561',
-      'editorBracketMatch.background':   '#3b82f620',
-      'editorBracketMatch.border':       '#82aaff60',
-      'scrollbar.shadow':                '#00000000',
-      'scrollbarSlider.background':      '#3b456140',
-      'scrollbarSlider.hoverBackground': '#3b456170',
-      'scrollbarSlider.activeBackground':'#3b4561aa',
-      'editor.findMatchBackground':      '#f78c6c40',
-      'editor.findMatchHighlightBackground': '#c792ea20',
+      'editor.background':                '#0d111a',
+      'editor.foreground':                '#cdd6f4',
+      'editorLineNumber.foreground':      '#3a4157',
+      'editorLineNumber.activeForeground':'#7c87aa',
+      'editor.selectionBackground':       '#3b82f626',
+      'editor.inactiveSelectionBackground':'#3b82f614',
+      'editor.lineHighlightBackground':   '#161c2a',
+      'editor.lineHighlightBorder':       '#1e2740',
+      'editorCursor.foreground':          '#82aaff',
+      'editorIndentGuide.background':     '#1e2740',
+      'editorIndentGuide.activeBackground':'#3b4561',
+      'editorBracketMatch.background':    '#3b82f620',
+      'editorBracketMatch.border':        '#82aaff60',
+      'scrollbar.shadow':                 '#00000000',
+      'scrollbarSlider.background':       '#3b456140',
+      'scrollbarSlider.hoverBackground':  '#3b456170',
+      'scrollbarSlider.activeBackground': '#3b4561aa',
+      'editor.findMatchBackground':       '#f78c6c40',
+      'editor.findMatchHighlightBackground':'#c792ea20',
+    },
+  });
+
+  /* Light / Solarized theme */
+  monaco.editor.defineTheme(LIGHT_THEME, {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment',   foreground: '93a1a1', fontStyle: 'italic' },
+      { token: 'keyword',   foreground: '859900', fontStyle: 'bold' },
+      { token: 'string',    foreground: '2aa198' },
+      { token: 'number',    foreground: 'd33682' },
+      { token: 'type',      foreground: '268bd2' },
+      { token: 'function',  foreground: '268bd2' },
+      { token: 'variable',  foreground: '657b83' },
+      { token: 'delimiter', foreground: '2aa198' },
+      { token: 'operator',  foreground: '657b83' },
+    ],
+    colors: {
+      'editor.background':                '#fdf6e3',
+      'editor.foreground':                '#657b83',
+      'editorLineNumber.foreground':      '#b5b5a0',
+      'editorLineNumber.activeForeground':'#839496',
+      'editor.selectionBackground':       '#eee8d5',
+      'editor.inactiveSelectionBackground':'#eee8d5aa',
+      'editor.lineHighlightBackground':   '#eee8d588',
+      'editor.lineHighlightBorder':       '#e0d9c8',
+      'editorCursor.foreground':          '#268bd2',
+      'editorIndentGuide.background':     '#ddd8c8',
+      'editorIndentGuide.activeBackground':'#c5bfae',
+      'editorBracketMatch.background':    '#268bd220',
+      'editorBracketMatch.border':        '#268bd280',
+      'scrollbar.shadow':                 '#00000000',
+      'scrollbarSlider.background':       '#c5bfae50',
+      'scrollbarSlider.hoverBackground':  '#c5bfae99',
+      'scrollbarSlider.activeBackground': '#c5bfaecc',
+      'editor.findMatchBackground':       '#d3368240',
+      'editor.findMatchHighlightBackground':'#85990020',
     },
   });
 }
@@ -97,6 +142,8 @@ export default function CodeCell({
   onAiHelper, onExecutionComplete, onFocus, runAllTrigger,
   onDragStart, onDragEnd, onDragOver, onDrop, isDragOver
 }: CodeCellProps) {
+  const { isDark }                          = useTheme();
+
   const [language, setLanguage]             = useState(initialLanguage);
   const [codeContent, setCodeContent]       = useState(initialCode || DEFAULT_CODE[initialLanguage] || '');
   const [isRunning, setIsRunning]           = useState(false);
@@ -106,16 +153,38 @@ export default function CodeCell({
   const [copiedStdout, setCopiedStdout]     = useState(false);
   const [copiedStderr, setCopiedStderr]     = useState(false);
   const [dataInjected, setDataInjected]     = useState(false);
-  const [editorReady, setEditorReady]       = useState(false);
+  const [intellisenseOn, setIntellisenseOn] = useState(true);
 
   const editorRef  = useRef<any>(null);
   const monacoRef  = useRef<any>(null);
-  // Always-fresh ref so addCommand closure never goes stale
   const runRef     = useRef<() => void>(() => {});
   const codeRef    = useRef(codeContent);
 
   /* keep codeRef in sync */
   useEffect(() => { codeRef.current = codeContent; }, [codeContent]);
+
+  /* ── Dynamic Monaco theme when app theme changes ─────────────*/
+  useEffect(() => {
+    if (monacoRef.current) {
+      monacoRef.current.editor.setTheme(isDark ? DARK_THEME : LIGHT_THEME);
+    }
+  }, [isDark]);
+
+  /* ── Dynamic IntelliSense toggle ────────────────────────────*/
+  useEffect(() => {
+    if (editorRef.current) {
+      editorRef.current.updateOptions({
+        quickSuggestions:   intellisenseOn
+          ? { other: true, comments: false, strings: false }
+          : false,
+        suggestOnTriggerCharacters: intellisenseOn,
+        parameterHints:     { enabled: intellisenseOn },
+        wordBasedSuggestions: intellisenseOn ? 'matchingDocuments' : 'off',
+        suggest:            { showKeywords: intellisenseOn, showSnippets: intellisenseOn },
+        inlineSuggest:      { enabled: intellisenseOn },
+      });
+    }
+  }, [intellisenseOn]);
 
   /* ── run-all trigger ──────────────────────────────────────────*/
   useEffect(() => {
@@ -202,8 +271,9 @@ export default function CodeCell({
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current  = editor;
     monacoRef.current  = monaco;
-    registerTheme(monaco);
-    monaco.editor.setTheme('collabcode-dark');
+    registerThemes(monaco);
+    // Apply correct theme based on current app theme
+    monaco.editor.setTheme(isDark ? DARK_THEME : LIGHT_THEME);
 
     // Ctrl+Enter / Cmd+Enter → run
     editor.addCommand(
@@ -211,14 +281,15 @@ export default function CodeCell({
       () => runRef.current()
     );
 
-    // Auto-layout on resize
     editor.updateOptions({ automaticLayout: true });
-    setEditorReady(true);
   };
 
   /* ── editor height (grows with content, capped) ──────────────*/
-  const lineCount   = codeContent.split('\n').length;
+  const lineCount    = codeContent.split('\n').length;
   const editorHeight = Math.min(Math.max(lineCount * 21 + 40, 160), 560);
+
+  /* ── editor bg matches theme ────────────────────────────────*/
+  const editorBg = isDark ? '#0d111a' : '#fdf6e3';
 
   /* ── icon button helper ──────────────────────────────────────*/
   const iconBtn = (
@@ -293,6 +364,22 @@ export default function CodeCell({
         </div>
 
         <div className="flex items-center gap-1.5">
+          {/* IntelliSense toggle */}
+          <button
+            onClick={() => setIntellisenseOn(v => !v)}
+            title={intellisenseOn ? 'IntelliSense ON — click to disable' : 'IntelliSense OFF — click to enable'}
+            className={`group relative flex items-center justify-center h-7 rounded-lg transition-all duration-200 overflow-hidden px-2 max-w-[28px] hover:max-w-[140px] hover:px-3 shrink-0 border ${
+              intellisenseOn
+                ? 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20'
+                : 'bg-transparent text-outline border-transparent hover:border-outline-variant/30 hover:bg-surface-variant opacity-50 hover:opacity-80'
+            }`}
+          >
+            <Lightbulb size={14} className={`shrink-0 transition-all ${intellisenseOn ? 'fill-primary/20' : ''}`} />
+            <span className="w-0 opacity-0 group-hover:w-auto group-hover:opacity-100 transition-all duration-200 whitespace-nowrap overflow-hidden ml-0 group-hover:ml-1.5 text-[10px] font-bold uppercase tracking-wide">
+              {intellisenseOn ? 'IntelliSense On' : 'IntelliSense Off'}
+            </span>
+          </button>
+
           {/* AI Helper */}
           {iconBtn(
             <Sparkles size={14} />,
@@ -345,15 +432,14 @@ export default function CodeCell({
       </div>
 
       {/* ── Monaco Editor ──────────────────────────────────────── */}
-      <div className="relative bg-[#0d111a]">
-        {/* Subtle top gradient overlay */}
+      <div className="relative transition-colors duration-300" style={{ backgroundColor: editorBg }}>
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary/20 to-transparent pointer-events-none z-10" />
 
         <Editor
           height={editorHeight}
           language={MONACO_LANG[language] || 'plaintext'}
           defaultValue={codeContent}
-          theme="collabcode-dark"
+          theme={isDark ? DARK_THEME : LIGHT_THEME}
           onMount={handleEditorMount}
           onChange={(value) => {
             const newCode = value ?? '';
@@ -368,40 +454,46 @@ export default function CodeCell({
             </div>
           }
           options={{
-            fontSize:              13,
-            fontFamily:            "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
-            fontLigatures:         true,
-            lineHeight:            21,
-            letterSpacing:         0.3,
-            padding:               { top: 16, bottom: 16 },
-            minimap:               { enabled: false },
-            scrollBeyondLastLine:  false,
-            automaticLayout:       true,
-            wordWrap:              'off',
-            tabSize:               4,
-            insertSpaces:          true,
-            renderWhitespace:      'selection',
-            renderLineHighlight:   'gutter',
-            cursorBlinking:        'smooth',
-            cursorSmoothCaretAnimation: 'on',
-            smoothScrolling:       true,
-            bracketPairColorization: { enabled: true },
-            guides:                { bracketPairs: true, indentation: true },
-            suggest:               { showKeywords: true, showSnippets: true },
-            quickSuggestions:      { other: true, comments: false, strings: false },
-            parameterHints:        { enabled: true },
-            folding:               true,
-            foldingHighlight:      true,
-            showFoldingControls:   'mouseover',
-            overviewRulerLanes:    0,
-            hideCursorInOverviewRuler: true,
+            fontSize:                     13,
+            fontFamily:                   "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
+            fontLigatures:                true,
+            lineHeight:                   21,
+            letterSpacing:                0.3,
+            padding:                      { top: 16, bottom: 16 },
+            minimap:                      { enabled: false },
+            scrollBeyondLastLine:         false,
+            automaticLayout:              true,
+            wordWrap:                     'off',
+            tabSize:                      4,
+            insertSpaces:                 true,
+            renderWhitespace:             'selection',
+            renderLineHighlight:          'gutter',
+            cursorBlinking:               'smooth',
+            cursorSmoothCaretAnimation:   'on',
+            smoothScrolling:              true,
+            bracketPairColorization:      { enabled: true },
+            guides:                       { bracketPairs: true, indentation: true },
+            /* IntelliSense — controlled by intellisenseOn state */
+            quickSuggestions:             intellisenseOn
+              ? { other: true, comments: false, strings: false }
+              : false,
+            suggestOnTriggerCharacters:   intellisenseOn,
+            parameterHints:               { enabled: intellisenseOn },
+            wordBasedSuggestions:         intellisenseOn ? 'matchingDocuments' : 'off',
+            suggest:                      { showKeywords: intellisenseOn, showSnippets: intellisenseOn },
+            inlineSuggest:                { enabled: intellisenseOn },
+            folding:                      true,
+            foldingHighlight:             true,
+            showFoldingControls:          'mouseover',
+            overviewRulerLanes:           0,
+            hideCursorInOverviewRuler:    true,
             scrollbar: {
               vertical:              'auto',
               horizontal:            'auto',
               verticalScrollbarSize:  6,
               horizontalScrollbarSize: 6,
             },
-            lineNumbersMinChars:   3,
+            lineNumbersMinChars:          3,
           }}
         />
       </div>
@@ -441,7 +533,6 @@ export default function CodeCell({
                 <span className={`font-console-text text-[11px] font-semibold ${executionResult.stderr || executionResult.error || executionResult.status !== 'Accepted' ? 'text-error/80' : 'text-secondary/80'}`}>
                   {executionResult.error ? 'Execution Failed' : (executionResult.status || 'Accepted')}
                 </span>
-
                 {executionResult.time !== null && executionResult.time !== undefined && (
                   <span className="text-[10px] text-primary bg-primary/10 px-2 py-0.5 rounded-full font-bold">
                     Response Time: {executionResult.time}s
