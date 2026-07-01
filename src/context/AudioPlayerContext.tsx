@@ -220,7 +220,8 @@ export function AudioPlayerProvider({ children }: { children: React.ReactNode })
           active &&
           (active.tagName === 'INPUT' ||
             active.tagName === 'TEXTAREA' ||
-            active.getAttribute('contenteditable') === 'true');
+            active.getAttribute('contenteditable') === 'true' ||
+            active.closest('.monaco-editor'));
         if (!isInput) {
           e.preventDefault();
           togglePlay();

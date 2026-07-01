@@ -1797,6 +1797,13 @@ export default function CollabCodeIDE() {
           </div>
         </div>
       )}
+      {/* Alpha version label */}
+      <div className="fixed bottom-4 right-4 z-[99] pointer-events-none select-none">
+        <span className="text-[10px] font-bold font-ui-label text-primary uppercase tracking-widest bg-surface-container-highest/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-outline-variant/30 shadow-md">
+          this is currently in Alpha version
+        </span>
+      </div>
+
       <FocusMusicWidget />
 
       {/* Auth Gate — blocks the IDE until user is authenticated */}
