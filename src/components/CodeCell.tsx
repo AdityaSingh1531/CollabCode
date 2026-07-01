@@ -1,24 +1,86 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import Editor, { type OnMount } from '@monaco-editor/react';
 import {
   Play, Loader2, Trash2, BrainCircuit, CheckCircle2, AlertCircle,
   Sparkles, Keyboard, Copy, Check, GripVertical
 } from 'lucide-react';
 
+/* ── Language map ─────────────────────────────────────────────── */
+const MONACO_LANG: Record<string, string> = {
+  python3:  'python',
+  cpp17:    'cpp',
+  java:     'java',
+  nodejs:   'javascript',
+  sql:      'sql',
+};
+
+/* ── Custom theme (registered once) ──────────────────────────── */
+let themeRegistered = false;
+function registerTheme(monaco: any) {
+  if (themeRegistered) return;
+  themeRegistered = true;
+  monaco.editor.defineTheme('collabcode-dark', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      { token: 'comment',    foreground: '6b7db3', fontStyle: 'italic' },
+      { token: 'keyword',    foreground: 'c792ea' },
+      { token: 'string',     foreground: 'c3e88d' },
+      { token: 'number',     foreground: 'f78c6c' },
+      { token: 'type',       foreground: '82aaff' },
+      { token: 'function',   foreground: '82aaff' },
+      { token: 'variable',   foreground: 'eeffff' },
+      { token: 'delimiter',  foreground: '89ddff' },
+    ],
+    colors: {
+      'editor.background':               '#0d111a',
+      'editor.foreground':               '#cdd6f4',
+      'editorLineNumber.foreground':     '#3a4157',
+      'editorLineNumber.activeForeground': '#7c87aa',
+      'editor.selectionBackground':      '#3b82f626',
+      'editor.inactiveSelectionBackground': '#3b82f614',
+      'editor.lineHighlightBackground':  '#161c2a',
+      'editor.lineHighlightBorder':      '#1e2740',
+      'editorCursor.foreground':         '#82aaff',
+      'editorIndentGuide.background':    '#1e2740',
+      'editorIndentGuide.activeBackground': '#3b4561',
+      'editorBracketMatch.background':   '#3b82f620',
+      'editorBracketMatch.border':       '#82aaff60',
+      'scrollbar.shadow':                '#00000000',
+      'scrollbarSlider.background':      '#3b456140',
+      'scrollbarSlider.hoverBackground': '#3b456170',
+      'scrollbarSlider.activeBackground':'#3b4561aa',
+      'editor.findMatchBackground':      '#f78c6c40',
+      'editor.findMatchHighlightBackground': '#c792ea20',
+    },
+  });
+}
+
+/* ── Default starter code ─────────────────────────────────────── */
+const DEFAULT_CODE: Record<string, string> = {
+  python3: 'print("Hello from CollabCode!")\nfor i in range(5):\n    print(f"Counting: {i}")',
+  cpp17:   '#include <iostream>\n\nint main() {\n    std::cout << "Hello from C++17!" << std::endl;\n    return 0;\n}',
+  java:    'public class MyClass {\n    public static void main(String args[]) {\n        System.out.println("Hello from Java!");\n    }\n}',
+  nodejs:  'console.log("Hello from Node.js!");\nfor (let i = 0; i < 5; i++) {\n    console.log(`Counting: ${i}`);\n}',
+  sql:     'SELECT 1 + 1 AS result;',
+};
+
+/* ── Props ────────────────────────────────────────────────────── */
 interface CodeCellProps {
   id: string;
   initialCode?: string;
   initialLanguage?: string;
   initialStdin?: string;
-  injectedStdin?: string;          // externally injected via Data Sources sidebar
+  injectedStdin?: string;
   onDelete?: () => void;
   onCodeChange?: (code: string) => void;
   onLanguageChange?: (language: string) => void;
   onStdinChange?: (stdin: string) => void;
   onAiHelper?: () => void;
   onExecutionComplete?: (success: boolean) => void;
-  onFocus?: () => void;             // called when cell is clicked / focused
+  onFocus?: () => void;
   runAllTrigger?: number;
   onDragStart?: (e: React.DragEvent) => void;
   onDragEnd?: (e: React.DragEvent) => void;
@@ -27,13 +89,7 @@ interface CodeCellProps {
   isDragOver?: boolean;
 }
 
-const DEFAULT_CODE: Record<string, string> = {
-  python3: 'print("Hello from CollabCode!")\nfor i in range(5):\n    print(f"Counting: {i}")',
-  cpp17: '#include <iostream>\n\nint main() {\n    std::cout << "Hello from C++17!" << std::endl;\n    return 0;\n}',
-  java: 'public class MyClass {\n    public static void main(String args[]) {\n        System.out.println("Hello from Java!");\n    }\n}',
-  nodejs: 'console.log("Hello from Node.js!");\nfor (let i = 0; i < 5; i++) {\n    console.log(`Counting: ${i}`);\n}'
-};
-
+/* ── Component ────────────────────────────────────────────────── */
 export default function CodeCell({
   id, initialCode = '', initialLanguage = 'python3', initialStdin = '',
   injectedStdin,
@@ -41,27 +97,35 @@ export default function CodeCell({
   onAiHelper, onExecutionComplete, onFocus, runAllTrigger,
   onDragStart, onDragEnd, onDragOver, onDrop, isDragOver
 }: CodeCellProps) {
-  const [language, setLanguage]           = useState(initialLanguage);
-  const [codeContent, setCodeContent]     = useState(initialCode);
-  const [isRunning, setIsRunning]         = useState(false);
+  const [language, setLanguage]             = useState(initialLanguage);
+  const [codeContent, setCodeContent]       = useState(initialCode || DEFAULT_CODE[initialLanguage] || '');
+  const [isRunning, setIsRunning]           = useState(false);
   const [executionResult, setExecutionResult] = useState<any>(null);
-  const [isStdinOpen, setIsStdinOpen]     = useState(!!initialStdin);
-  const [stdinContent, setStdinContent]   = useState(initialStdin);
-  const [copiedStdout, setCopiedStdout]   = useState(false);
-  const [copiedStderr, setCopiedStderr]   = useState(false);
-  const [dataInjected, setDataInjected]   = useState(false);
+  const [isStdinOpen, setIsStdinOpen]       = useState(!!initialStdin);
+  const [stdinContent, setStdinContent]     = useState(initialStdin);
+  const [copiedStdout, setCopiedStdout]     = useState(false);
+  const [copiedStderr, setCopiedStderr]     = useState(false);
+  const [dataInjected, setDataInjected]     = useState(false);
+  const [editorReady, setEditorReady]       = useState(false);
 
+  const editorRef  = useRef<any>(null);
+  const monacoRef  = useRef<any>(null);
+  // Always-fresh ref so addCommand closure never goes stale
+  const runRef     = useRef<() => void>(() => {});
+  const codeRef    = useRef(codeContent);
+
+  /* keep codeRef in sync */
+  useEffect(() => { codeRef.current = codeContent; }, [codeContent]);
+
+  /* ── run-all trigger ──────────────────────────────────────────*/
   useEffect(() => {
-    if (runAllTrigger !== undefined && runAllTrigger > 0) {
-      handleRun();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (runAllTrigger !== undefined && runAllTrigger > 0) handleRun();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runAllTrigger]);
 
-  // Apply externally injected stdin from the Data Sources sidebar
+  /* ── injected stdin ───────────────────────────────────────────*/
   useEffect(() => {
     if (injectedStdin !== undefined && injectedStdin !== '') {
-      // Strip tick suffix added by page.tsx to force re-trigger on same content
       const clean = injectedStdin.split('\0tick:')[0];
       setStdinContent(clean);
       setIsStdinOpen(true);
@@ -69,22 +133,27 @@ export default function CodeCell({
       onStdinChange?.(clean);
       setTimeout(() => setDataInjected(false), 3000);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [injectedStdin]);
 
+  /* ── language change → update Monaco model language ──────────*/
+  useEffect(() => {
+    if (editorRef.current && monacoRef.current) {
+      const model = editorRef.current.getModel();
+      if (model) {
+        monacoRef.current.editor.setModelLanguage(model, MONACO_LANG[language] || 'plaintext');
+      }
+    }
+  }, [language]);
+
+  /* ── handlers ────────────────────────────────────────────────*/
   const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newLang = e.target.value;
     setLanguage(newLang);
     onLanguageChange?.(newLang);
   };
 
-  const handleCodeChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newCode = e.target.value;
-    setCodeContent(newCode);
-    onCodeChange?.(newCode);
-  };
-
-  const handleRun = async () => {
+  const handleRun = useCallback(async () => {
     if (isRunning) return;
     setIsRunning(true);
     setExecutionResult(null);
@@ -94,7 +163,7 @@ export default function CodeCell({
       const res = await fetch('/api/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: codeContent, language, stdin: stdinContent }),
+        body: JSON.stringify({ code: codeRef.current, language, stdin: stdinContent }),
       });
 
       const endTime = performance.now();
@@ -123,9 +192,35 @@ export default function CodeCell({
     } finally {
       setIsRunning(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language, stdinContent]);
+
+  /* keep runRef fresh */
+  useEffect(() => { runRef.current = handleRun; }, [handleRun]);
+
+  /* ── Monaco mount ────────────────────────────────────────────*/
+  const handleEditorMount: OnMount = (editor, monaco) => {
+    editorRef.current  = editor;
+    monacoRef.current  = monaco;
+    registerTheme(monaco);
+    monaco.editor.setTheme('collabcode-dark');
+
+    // Ctrl+Enter / Cmd+Enter → run
+    editor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
+      () => runRef.current()
+    );
+
+    // Auto-layout on resize
+    editor.updateOptions({ automaticLayout: true });
+    setEditorReady(true);
   };
 
-  /* ── Expandable icon-button helper ─────────────────────── */
+  /* ── editor height (grows with content, capped) ──────────────*/
+  const lineCount   = codeContent.split('\n').length;
+  const editorHeight = Math.min(Math.max(lineCount * 21 + 40, 160), 560);
+
+  /* ── icon button helper ──────────────────────────────────────*/
   const iconBtn = (
     icon: React.ReactNode,
     label: string,
@@ -160,7 +255,7 @@ export default function CodeCell({
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
-      {/* Cell Header */}
+      {/* ── Cell Header ────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-3 h-11 bg-surface-container-high border-b border-outline-variant/30">
         <div className="flex items-center gap-2">
           {/* Drag Handle */}
@@ -183,10 +278,10 @@ export default function CodeCell({
             className="bg-[#1b263b] border border-outline-variant rounded-lg px-2 py-1 text-[11px] font-semibold text-white hover:border-primary/55 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/25 transition-all cursor-pointer"
           >
             <option value="python3" className="bg-[#1b263b] text-white">Python 3</option>
-            <option value="cpp17" className="bg-[#1b263b] text-white">C++ 17</option>
-            <option value="java" className="bg-[#1b263b] text-white">Java</option>
-            <option value="nodejs" className="bg-[#1b263b] text-white">Node.js</option>
-            <option value="sql" className="bg-[#1b263b] text-white">SQL / MySQL</option>
+            <option value="cpp17"   className="bg-[#1b263b] text-white">C++ 17</option>
+            <option value="java"    className="bg-[#1b263b] text-white">Java</option>
+            <option value="nodejs"  className="bg-[#1b263b] text-white">Node.js</option>
+            <option value="sql"     className="bg-[#1b263b] text-white">SQL / MySQL</option>
           </select>
 
           {/* Data-injected badge */}
@@ -249,28 +344,69 @@ export default function CodeCell({
         </div>
       </div>
 
-      {/* Editor */}
-      <div className="flex bg-surface-container-lowest relative">
-        <div className="absolute inset-0 bg-gradient-to-b from-surface-container/20 to-transparent pointer-events-none" />
-        {/* Line Numbers */}
-        <div className="w-10 bg-surface-container-high/20 py-4 flex flex-col items-center font-code-block text-outline opacity-50 select-none border-r border-outline-variant/30 text-[11px] leading-relaxed">
-          {codeContent.split('\n').map((_, i) => <div key={i}>{i + 1}</div>)}
-        </div>
-        <div className="flex-1 relative">
-          <textarea
-            value={codeContent}
-            onChange={handleCodeChange}
-            onKeyDown={(e) => {
-              if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); handleRun(); }
-            }}
-            className="w-full bg-transparent p-4 outline-none resize-none overflow-hidden text-on-surface-variant font-code-block leading-relaxed text-[13px]"
-            rows={Math.max(codeContent.split('\n').length, 5)}
-            spellCheck={false}
-          />
-        </div>
+      {/* ── Monaco Editor ──────────────────────────────────────── */}
+      <div className="relative bg-[#0d111a]">
+        {/* Subtle top gradient overlay */}
+        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary/20 to-transparent pointer-events-none z-10" />
+
+        <Editor
+          height={editorHeight}
+          language={MONACO_LANG[language] || 'plaintext'}
+          defaultValue={codeContent}
+          theme="collabcode-dark"
+          onMount={handleEditorMount}
+          onChange={(value) => {
+            const newCode = value ?? '';
+            setCodeContent(newCode);
+            codeRef.current = newCode;
+            onCodeChange?.(newCode);
+          }}
+          loading={
+            <div className="flex items-center justify-center gap-2 py-10 text-outline/60">
+              <Loader2 size={16} className="animate-spin" />
+              <span className="text-[12px] font-mono">Loading editor…</span>
+            </div>
+          }
+          options={{
+            fontSize:              13,
+            fontFamily:            "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
+            fontLigatures:         true,
+            lineHeight:            21,
+            letterSpacing:         0.3,
+            padding:               { top: 16, bottom: 16 },
+            minimap:               { enabled: false },
+            scrollBeyondLastLine:  false,
+            automaticLayout:       true,
+            wordWrap:              'off',
+            tabSize:               4,
+            insertSpaces:          true,
+            renderWhitespace:      'selection',
+            renderLineHighlight:   'gutter',
+            cursorBlinking:        'smooth',
+            cursorSmoothCaretAnimation: 'on',
+            smoothScrolling:       true,
+            bracketPairColorization: { enabled: true },
+            guides:                { bracketPairs: true, indentation: true },
+            suggest:               { showKeywords: true, showSnippets: true },
+            quickSuggestions:      { other: true, comments: false, strings: false },
+            parameterHints:        { enabled: true },
+            folding:               true,
+            foldingHighlight:      true,
+            showFoldingControls:   'mouseover',
+            overviewRulerLanes:    0,
+            hideCursorInOverviewRuler: true,
+            scrollbar: {
+              vertical:              'auto',
+              horizontal:            'auto',
+              verticalScrollbarSize:  6,
+              horizontalScrollbarSize: 6,
+            },
+            lineNumbersMinChars:   3,
+          }}
+        />
       </div>
 
-      {/* Stdin */}
+      {/* ── Stdin ─────────────────────────────────────────────────*/}
       {isStdinOpen && (
         <div className="bg-surface-container-low border-t border-outline-variant/40 p-3 flex flex-col gap-2">
           <span className="font-ui-label text-[10px] uppercase tracking-wider text-outline font-semibold flex items-center gap-1.5">
@@ -286,7 +422,7 @@ export default function CodeCell({
         </div>
       )}
 
-      {/* Output Console */}
+      {/* ── Output Console ────────────────────────────────────────*/}
       <div className="bg-surface-container-lowest border-t border-outline-variant p-4 min-h-[70px]">
         {isRunning ? (
           <div className="flex items-center gap-2">
