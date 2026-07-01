@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 export async function POST(req: Request) {
   try {
-    const { code, language, prompt } = await req.json();
+    const { code, language, prompt, history } = await req.json();
 
     if (!code || !code.trim()) {
       return NextResponse.json({ response: "📝 The code cell is empty. Please enter some code first to analyze!" });
@@ -13,6 +13,16 @@ export async function POST(req: Request) {
     // If the user has entered their Mistral API key, route to the real Codestral model!
     if (mistralKey && mistralKey !== 'your_mistral_api_key_here') {
       try {
+        const formattedHistory = Array.isArray(history) ? history.map((m: any) => ({
+          role: m.role,
+          content: m.content
+        })) : [];
+
+        const systemMessage = {
+          role: 'system',
+          content: `You are an expert AI code analyzer embedded in a collaborative IDE. Your goal is to analyze, explain, debug, or optimize the provided code cell block. Respond concisely in Markdown format. The user's active code environment language is ${language || 'unknown'}. Here is the current code block context:\n\`\`\`${language || ''}\n${code}\n\`\`\``
+        };
+
         const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -23,13 +33,11 @@ export async function POST(req: Request) {
           body: JSON.stringify({
             model: 'codestral-latest',
             messages: [
-              {
-                role: 'system',
-                content: `You are an expert AI code analyzer embedded in a collaborative IDE. Your goal is to analyze, explain, debug, or optimize the provided code cell block. Respond concisely in Markdown format. The user's active code environment language is ${language || 'unknown'}.`
-              },
+              systemMessage,
+              ...formattedHistory,
               {
                 role: 'user',
-                content: `Here is the current code block:\n\`\`\`${language || ''}\n${code}\n\`\`\`\n\nUser request regarding this code:\n${prompt || 'Please explain what this code does.'}`
+                content: prompt || 'Please explain what this code does.'
               }
             ],
             temperature: 0.2

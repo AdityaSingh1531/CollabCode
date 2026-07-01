@@ -13,7 +13,6 @@ import LoginModal from '@/components/LoginModal';
 import DataSourcesSidebar from '@/components/DataSourcesSidebar';
 
 export default function CollabCodeIDE() {
-  const { isDark, toggleTheme } = useTheme();
 
   // ── Auth state ─────────────────────────────────────────────────────────────
   interface UserProfile { id: string; username: string; displayName: string; createdAt: string; }
@@ -163,8 +162,12 @@ export default function CollabCodeIDE() {
     }
   }, []);
 
+  const { isDark, toggleTheme, isMuted, toggleMute } = useTheme();
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
   // Sound effects logic
   const playSound = useCallback((type: 'bubble' | 'pop' | 'correct' | 'error') => {
+    if (isMuted) return;
     try {
       const audio = audioRefs.current[type];
       if (audio) {
@@ -176,7 +179,7 @@ export default function CollabCodeIDE() {
     } catch (e) {
       console.error('Failed to play sound:', e);
     }
-  }, []);
+  }, [isMuted]);
 
   // Global Button Click Sound (excluding Run button and no-sound zones)
   useEffect(() => {
@@ -208,14 +211,79 @@ export default function CollabCodeIDE() {
   const [aiResponse, setAiResponse] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
 
+  // Chat History / Multi-Chat States
+  interface ChatItem { id: string; title: string; cell_id: string; created_at: string; }
+  interface ChatMessage { role: 'user' | 'assistant'; content: string; }
+  const [userChats, setUserChats] = useState<ChatItem[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+
+  // Load chats for active cell
+  const loadUserChats = useCallback(async (cellId: string) => {
+    if (!currentUser) {
+      setUserChats([]);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/analyze/chats?cellId=${cellId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setUserChats(data.chats || []);
+      }
+    } catch (e) {
+      console.error('Failed to load user chats:', e);
+    }
+  }, [currentUser]);
+
+  // Load messages for specific chat
+  const loadChatMessages = useCallback(async (chatId: string) => {
+    try {
+      const res = await fetch(`/api/analyze/messages?chatId=${chatId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setChatMessages(data.messages || []);
+        if (data.messages && data.messages.length > 0) {
+          const lastUserMsg = [...data.messages].reverse().find(m => m.role === 'user');
+          const lastAiMsg = [...data.messages].reverse().find(m => m.role === 'assistant');
+          setLastQuery(lastUserMsg?.content || '');
+          setAiResponse(lastAiMsg?.content || '');
+        } else {
+          setLastQuery('');
+          setAiResponse('');
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load messages:', e);
+    }
+  }, []);
+
   const handleOpenAiSidebar = (cellId: string) => {
     setActiveCellIdForAi(cellId);
     setIsAiSidebarOpen(true);
+    setChatMessages([]);
+    setActiveChatId(null);
+    setLastQuery('');
+    setAiResponse('');
+    loadUserChats(cellId);
   };
 
   const closeAiSidebar = () => {
     setIsAiSidebarOpen(false);
     setActiveCellIdForAi(null);
+    setActiveChatId(null);
+    setChatMessages([]);
+  };
+
+  const handleSelectChat = (chatId: string) => {
+    setActiveChatId(chatId);
+    loadChatMessages(chatId);
+  };
+
+  const handleStartNewChat = () => {
+    setActiveChatId(null);
+    setChatMessages([]);
+    setLastQuery('');
+    setAiResponse('');
   };
 
   const handleAiAnalyze = async (customPrompt?: string) => {
@@ -227,19 +295,61 @@ export default function CollabCodeIDE() {
     setLastQuery(promptToSend);
     setIsAiLoading(true);
     setAiResponse('');
+
+    const newHistory = [...chatMessages, { role: 'user', content: promptToSend }];
+    setChatMessages(newHistory as any);
+
     try {
+      // 1. Get AI completions
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code: activeCell.code || '',
           language: activeCell.language || 'python3',
-          prompt: promptToSend
+          prompt: promptToSend,
+          history: newHistory
         })
       });
       if (!res.ok) throw new Error(`API error: ${res.status}`);
       const data = await res.json();
       setAiResponse(data.response);
+
+      const aiMsg = { role: 'assistant', content: data.response };
+      setChatMessages(prev => [...prev, aiMsg as any]);
+
+      // 2. Persist in database if logged in
+      if (currentUser) {
+        // Create or get chat ID
+        const chatTitle = promptToSend.substring(0, 30) + (promptToSend.length > 30 ? '...' : '');
+        const chatRes = await fetch('/api/analyze/chats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chatId: activeChatId,
+            cellId: activeCell.id,
+            title: chatTitle,
+            message: { role: 'user', content: promptToSend }
+          })
+        });
+        if (chatRes.ok) {
+          const chatData = await chatRes.json();
+          const targetId = chatData.chatId;
+          if (!activeChatId) {
+            setActiveChatId(targetId);
+            loadUserChats(activeCell.id);
+          }
+          // Save assistant message
+          await fetch('/api/analyze/chats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chatId: targetId,
+              message: aiMsg
+            })
+          });
+        }
+      }
     } catch (err: any) {
       setAiResponse(`❌ Error generating response: ${err.message || 'Unknown network error'}`);
     } finally {
@@ -753,9 +863,31 @@ export default function CollabCodeIDE() {
             >
               {isDark ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <button className="p-1.5 rounded-md hover:bg-surface-variant hover:text-primary transition-colors" title="Settings">
-              <Settings size={18} />
-            </button>
+            <div className="relative">
+              <button 
+                onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+                className={`p-1.5 rounded-md hover:bg-surface-variant transition-colors ${isSettingsOpen ? 'text-primary' : ''}`} 
+                title="Settings"
+              >
+                <Settings size={18} />
+              </button>
+              {isSettingsOpen && (
+                <div 
+                  onMouseLeave={() => setIsSettingsOpen(false)}
+                  className="absolute right-0 top-10 w-48 bg-surface-container-highest border border-outline-variant rounded-xl shadow-2xl z-50 p-3"
+                >
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-ui-label text-on-surface">Mute Sounds</span>
+                    <button
+                      onClick={toggleMute}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${isMuted ? 'bg-primary' : 'bg-surface-variant'}`}
+                    >
+                      <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${isMuted ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
             {/* Profile + Logout Dropdown */}
             <div className="relative">
               <button
@@ -891,16 +1023,64 @@ export default function CollabCodeIDE() {
                 <Sparkles size={18} />
                 <span className="font-ui-header text-[14px] font-bold tracking-tight">AI Assistant</span>
               </div>
-              <button 
-                onClick={closeAiSidebar}
-                className="p-1.5 rounded-lg text-outline hover:text-on-surface hover:bg-surface-variant transition-colors"
-                title="Close AI Sidebar"
-              >
-                <X size={18} />
-              </button>
+              <div className="flex items-center gap-1">
+                {currentUser && (
+                  <>
+                    <button
+                      onClick={handleStartNewChat}
+                      className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors relative group"
+                    >
+                      <FilePlus size={18} />
+                      <span className="absolute bottom-full right-0 mb-2 hidden group-hover:block bg-surface-container-highest text-on-surface text-[10px] font-semibold px-2.5 py-1 rounded shadow-lg border border-outline-variant/40 whitespace-nowrap z-50">
+                        New Chat
+                      </span>
+                    </button>
+                  </>
+                )}
+                <button 
+                  onClick={closeAiSidebar}
+                  className="p-1.5 rounded-lg text-outline hover:text-on-surface hover:bg-surface-variant transition-colors"
+                  title="Close AI Sidebar"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
-            
-            <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-6 scroll-smooth">
+
+            {/* Sidebar main body */}
+            <div className="flex-1 flex flex-col min-w-0 overflow-y-auto p-5 gap-4">
+              
+              {/* Previous chats layout (only visible to authenticated users) */}
+              {currentUser && userChats.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <div className="font-ui-label text-[10px] font-bold text-outline uppercase tracking-widest flex items-center justify-between">
+                    <span>Previous Chats</span>
+                    <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[9px] font-bold">Personal Account</span>
+                  </div>
+                  <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+                    {userChats.map((chat) => (
+                      <button
+                        key={chat.id}
+                        onClick={() => handleSelectChat(chat.id)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-medium font-ui-label transition-all shrink-0 relative group ${
+                          activeChatId === chat.id
+                            ? 'bg-primary/15 text-primary border-primary/30 shadow-sm'
+                            : 'bg-surface-container border-outline-variant/50 text-on-surface-variant hover:border-outline hover:bg-surface-variant'
+                        }`}
+                      >
+                        <Sparkles size={11} className="shrink-0" />
+                        <span className="max-w-[80px] truncate">{chat.title}</span>
+                        
+                        {/* Hover name tooltip */}
+                        <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block bg-surface-container-highest text-on-surface text-[10px] font-semibold px-2 py-1 rounded shadow-lg border border-outline-variant/40 whitespace-nowrap z-50">
+                          {chat.title}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col gap-2">
                 <div className="font-ui-label text-[10px] font-bold text-outline uppercase tracking-widest">Context</div>
                 <div className="px-3 py-2 bg-surface-container rounded-lg border border-outline-variant/30 flex items-center justify-between shadow-sm">
@@ -913,9 +1093,9 @@ export default function CollabCodeIDE() {
               </div>
 
               {/* Chat Thread */}
-              <div className="flex flex-col gap-6 flex-1">
-                {!lastQuery && !isAiLoading && !aiResponse && (
-                  <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-4 opacity-70">
+              <div className="flex flex-col gap-6 flex-1 justify-end min-h-[200px]">
+                {chatMessages.length === 0 && !isAiLoading && (
+                  <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-4 opacity-70 my-auto">
                     <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-2">
                       <Sparkles size={24} />
                     </div>
@@ -950,71 +1130,47 @@ export default function CollabCodeIDE() {
                   </div>
                 )}
 
-                {lastQuery && (
-                  <div className="self-end bg-primary text-on-primary px-4 py-3 rounded-2xl rounded-tr-sm max-w-[85%] text-[13px] font-ui-body shadow-md animate-in slide-in-from-right-2 fade-in duration-200">
-                    {lastQuery}
+                {/* Render full message thread history */}
+                {chatMessages.length > 0 && (
+                  <div className="flex flex-col gap-4 overflow-y-auto max-h-[350px] scrollbar-thin">
+                    {chatMessages.map((msg, index) => (
+                      <div key={index} className={`flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                        {msg.role === 'assistant' && (
+                          <div className="flex items-center gap-2 ml-1">
+                            <div className="w-5 h-5 rounded-lg bg-surface-variant flex items-center justify-center text-primary shadow-sm border border-outline-variant/50">
+                              <Sparkles size={10} />
+                            </div>
+                            <span className="font-ui-header text-[11px] font-semibold text-on-surface">CollabCode AI</span>
+                          </div>
+                        )}
+                        <div className={`px-4 py-2.5 rounded-2xl text-[12.5px] font-ui-body shadow-sm max-w-[90%] ${
+                          msg.role === 'user' 
+                            ? 'bg-primary text-on-primary rounded-tr-sm' 
+                            : 'glass-panel bg-surface-container/60 border border-outline-variant/50 rounded-tl-sm text-on-surface-variant leading-relaxed prose prose-sm max-w-none prose-headings:font-ui-header prose-headings:text-on-surface prose-headings:font-semibold prose-p:my-1 prose-pre:my-2 prose-pre:bg-[#0d1117] prose-pre:border prose-pre:border-white/10 prose-pre:rounded-xl prose-pre:shadow-inner prose-pre:text-[11px] prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:font-code-block prose-code:before:content-none prose-code:after:content-none'
+                        }`}>
+                          {msg.role === 'user' ? (
+                            msg.content
+                          ) : (
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {msg.content}
+                            </ReactMarkdown>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
 
-                {(isAiLoading || aiResponse) && (
-                  <div className="flex flex-col gap-3 max-w-[95%] animate-in slide-in-from-left-2 fade-in duration-300">
-                    <div className="flex items-center gap-2 ml-1">
-                      <div className="w-6 h-6 rounded-lg bg-surface-variant flex items-center justify-center text-primary shadow-sm border border-outline-variant/50">
-                        <Sparkles size={12} />
-                      </div>
-                      <span className="font-ui-header text-[12px] font-semibold text-on-surface">CollabCode AI</span>
-                    </div>
-
-                    <div className="glass-panel bg-surface-container/60 border border-outline-variant/50 rounded-2xl rounded-tl-sm p-0 shadow-lg overflow-hidden flex flex-col backdrop-blur-xl">
-                      {isAiLoading ? (
-                        <div className="flex items-center gap-3 p-5">
-                          <Activity size={16} className="animate-spin text-primary" />
-                          <span className="font-ui-body text-[13px] text-on-surface-variant">Analyzing your code...</span>
-                        </div>
-                      ) : (
-                        <>
-                          {/* Main Response Content */}
-                          <div className="p-5 prose prose-sm dark:prose-invert max-w-none font-ui-body text-[13px] text-on-surface-variant leading-relaxed prose-headings:font-ui-header prose-headings:text-on-surface prose-headings:font-semibold prose-p:my-2 prose-pre:my-4 prose-pre:bg-[#0d1117] prose-pre:border prose-pre:border-white/10 prose-pre:rounded-xl prose-pre:shadow-inner prose-pre:text-[12px] prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:font-code-block prose-code:before:content-none prose-code:after:content-none">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {aiResponse}
-                            </ReactMarkdown>
-                          </div>
-                          
-                          {/* Footer Actions */}
-                          <div className="bg-surface-container-low border-t border-outline-variant/40 px-3 py-2.5 flex items-center gap-2 overflow-x-auto">
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(aiResponse);
-                                playSound('bubble');
-                              }}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-ui-label font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors"
-                            >
-                              <Copy size={13} /> Copy
-                            </button>
-                            <div className="w-px h-3 bg-outline-variant/50"></div>
-                            <button
-                              onClick={() => handleAiAnalyze(lastQuery)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-ui-label font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors"
-                            >
-                              <Activity size={13} /> Regenerate
-                            </button>
-                            <div className="w-px h-3 bg-outline-variant/50"></div>
-                            <button
-                              onClick={() => handleAiAnalyze('Explain this answer further')}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-ui-label font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors"
-                            >
-                              <Info size={13} /> Explain
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
+                {isAiLoading && (
+                  <div className="flex items-center gap-3 p-4 bg-surface-container/30 border border-outline-variant/40 rounded-xl max-w-[90%] animate-pulse">
+                    <Activity size={14} className="animate-spin text-primary" />
+                    <span className="font-ui-body text-[12px] text-on-surface-variant">Thinking...</span>
                   </div>
                 )}
               </div>
 
               {/* Chat Input Footer */}
-              <div className="mt-auto pt-4 border-t border-outline-variant/30">
+              <div className="pt-4 border-t border-outline-variant/30">
                 <div className="relative group">
                   <textarea 
                     value={aiQuery}
@@ -1027,7 +1183,7 @@ export default function CollabCodeIDE() {
                       if (e.key === 'Enter' && !e.shiftKey) { 
                         e.preventDefault(); 
                         handleAiAnalyze(); 
-                        setAiQuery(''); // Clear input after submit
+                        setAiQuery('');
                       } 
                     }}
                   />

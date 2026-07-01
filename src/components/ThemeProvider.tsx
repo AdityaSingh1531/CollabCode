@@ -10,15 +10,20 @@ import {
 } from 'react';
 
 const STORAGE_KEY = 'collabcode-theme';
+const SOUND_STORAGE_KEY = 'collabcode-sound-muted';
 
 interface ThemeContextValue {
   isDark: boolean;
   toggleTheme: () => void;
+  isMuted: boolean;
+  toggleMute: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
   isDark: true,
   toggleTheme: () => {},
+  isMuted: false,
+  toggleMute: () => {},
 });
 
 function applyThemeClass(isDark: boolean) {
@@ -31,13 +36,17 @@ function applyThemeClass(isDark: boolean) {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [isDark, setIsDark] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
 
-  // On mount, restore saved preference (default → dark).
+  // On mount, restore saved preferences.
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     const prefersDark = stored === null ? true : stored === 'dark';
     setIsDark(prefersDark);
     applyThemeClass(prefersDark);
+
+    const storedMuted = localStorage.getItem(SOUND_STORAGE_KEY);
+    setIsMuted(storedMuted === 'true');
   }, []);
 
   const toggleTheme = useCallback(() => {
@@ -49,8 +58,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const toggleMute = useCallback(() => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      localStorage.setItem(SOUND_STORAGE_KEY, next ? 'true' : 'false');
+      return next;
+    });
+  }, []);
+
   return (
-    <ThemeContext.Provider value={{ isDark, toggleTheme }}>
+    <ThemeContext.Provider value={{ isDark, toggleTheme, isMuted, toggleMute }}>
       {children}
     </ThemeContext.Provider>
   );
