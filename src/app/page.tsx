@@ -12,6 +12,86 @@ import FocusMusicWidget from '@/components/FocusMusicWidget';
 import LoginModal from '@/components/LoginModal';
 import DataSourcesSidebar from '@/components/DataSourcesSidebar';
 
+/* ── Virtual file injection ────────────────────────────────────────────────────
+   Generates code that, when prepended to the user's script, creates a real file
+   in JDoodle's sandbox FS so `open('filename')` works normally.
+──────────────────────────────────────────────────────────────────────────────── */
+function generateFileInjectionCode(content: string, filename: string, language: string): string {
+  // UTF-8 → binary → base64
+  const bytes = new TextEncoder().encode(content);
+  let binary = '';
+  bytes.forEach(b => { binary += String.fromCharCode(b); });
+  const b64 = btoa(binary);
+
+  const banner  = `# ── CollabCode: "${filename}" injected as virtual file ──`;
+  const divider = `# ──────────────────────────────────────────────────────`;
+
+  switch (language) {
+    case 'python3':
+      return [
+        banner,
+        `import base64 as _b64`,
+        `with open('${filename}', 'wb') as _fh:`,
+        `    _fh.write(_b64.b64decode('${b64}'))`,
+        `del _b64, _fh`,
+        divider,
+        ``,
+        ``,
+      ].join('\n');
+
+    case 'nodejs':
+      return [
+        `// ── CollabCode: "${filename}" injected as virtual file ──`,
+        `require('fs').writeFileSync('${filename}', Buffer.from('${b64}', 'base64'));`,
+        `// ──────────────────────────────────────────────────────`,
+        ``,
+        ``,
+      ].join('\n');
+
+    case 'cpp17': {
+      // Raw-string literal approach (safe for text files)
+      // Use a delimiter unlikely to appear in user content
+      const delim = 'CCRAW_INJECT';
+      return [
+        `// ── CollabCode: "${filename}" injected as virtual file ──`,
+        `#include <fstream>`,
+        `namespace { struct _CCFileInit {`,
+        `  _CCFileInit() {`,
+        `    std::ofstream _f("${filename}");`,
+        `    _f << R"${delim}(${content})${delim}";`,
+        `  }`,
+        `} _cc_fi; }`,
+        `// ──────────────────────────────────────────────────────`,
+        ``,
+        ``,
+      ].join('\n');
+    }
+
+    case 'java':
+      // Java requires code inside a class; generate a static block snippet
+      // and instruct user to paste into their class
+      return [
+        `// ── CollabCode: "${filename}" injected as virtual file ──`,
+        `// Add the following INSIDE your class (as a static block before main):`,
+        `/*`,
+        `  static {`,
+        `    try {`,
+        `      byte[] _d = java.util.Base64.getDecoder().decode("${b64}");`,
+        `      try (java.io.FileOutputStream _f = new java.io.FileOutputStream("${filename}")) { _f.write(_d); }`,
+        `    } catch (Exception _e) { _e.printStackTrace(); }`,
+        `  }`,
+        `*/`,
+        `// ──────────────────────────────────────────────────────`,
+        ``,
+        ``,
+      ].join('\n');
+
+    default:
+      return `# File: ${filename} — content injected by CollabCode\n\n`;
+  }
+}
+
+
 export default function CollabCodeIDE() {
 
   // ── Auth state ─────────────────────────────────────────────────────────────
@@ -32,8 +112,10 @@ export default function CollabCodeIDE() {
 
   // ── Data Sources sidebar state ──────────────────────────────────────────────
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
-  // Map from cellId → injected stdin string (keyed by a counter so re-injection always triggers useEffect)
+  // Map from cellId → injected stdin string
   const [injectedStdins, setInjectedStdins] = useState<Record<string, { content: string; tick: number }>>({});
+  // Map from cellId → injected code snippet (virtual file creation)
+  const [injectedCodes, setInjectedCodes]   = useState<Record<string, { code: string; tick: number }>>({});
 
   const handleInjectData = (content: string) => {
     const targetId = activeCellId ?? cells.find(c => c.type === 'code')?.id ?? null;
@@ -41,6 +123,17 @@ export default function CollabCodeIDE() {
     setInjectedStdins(prev => ({
       ...prev,
       [targetId]: { content, tick: (prev[targetId]?.tick ?? 0) + 1 },
+    }));
+  };
+
+  const handleInjectAsFile = (content: string, filename: string) => {
+    const targetId = activeCellId ?? cells.find(c => c.type === 'code')?.id ?? null;
+    if (!targetId) return;
+    const lang = cells.find(c => c.id === targetId)?.language ?? 'python3';
+    const code = generateFileInjectionCode(content, filename, lang);
+    setInjectedCodes(prev => ({
+      ...prev,
+      [targetId]: { code, tick: (prev[targetId]?.tick ?? 0) + 1 },
     }));
   };
 
@@ -927,7 +1020,7 @@ export default function CollabCodeIDE() {
       {/* Sidebar & Main Content */}
       <div className="flex flex-1 overflow-hidden relative">
         {/* Data Sources Sidebar */}
-        <DataSourcesSidebar onInject={handleInjectData} />
+        <DataSourcesSidebar onInject={handleInjectData} onInjectAsFile={handleInjectAsFile} />
 
         {/* Main Workspace Canvas */}
         <main className="flex-1 flex flex-col bg-background overflow-y-auto scroll-smooth relative">
@@ -953,6 +1046,11 @@ export default function CollabCodeIDE() {
                       injectedStdin={
                         injectedStdins[cell.id]
                           ? `${injectedStdins[cell.id].content}\u0000tick:${injectedStdins[cell.id].tick}`
+                          : undefined
+                      }
+                      injectedCode={
+                        injectedCodes[cell.id]
+                          ? `${injectedCodes[cell.id].code}\u0000tick:${injectedCodes[cell.id].tick}`
                           : undefined
                       }
                       onFocus={() => setActiveCellId(cell.id)}

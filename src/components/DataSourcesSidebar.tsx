@@ -4,7 +4,7 @@ import React, { useState, useRef, useCallback } from 'react';
 import {
   Database, Upload, Link2, X, ChevronRight, ChevronLeft,
   FileText, FileSpreadsheet, File, Trash2, ArrowRightCircle,
-  AlertCircle, CheckCircle2, Loader2,
+  AlertCircle, CheckCircle2, Loader2, FolderOpen,
 } from 'lucide-react';
 
 /* ─────────────────────────────────────────────────────────── types ── */
@@ -20,6 +20,7 @@ export interface DataSource {
 
 interface Props {
   onInject: (content: string) => void;
+  onInjectAsFile: (content: string, filename: string) => void;
 }
 
 /* ─────────────────────────────────────────────── helpers ── */
@@ -46,7 +47,7 @@ function fileIcon(name: string) {
 }
 
 /* ─────────────────────────────────────────────── component ── */
-export default function DataSourcesSidebar({ onInject }: Props) {
+export default function DataSourcesSidebar({ onInject, onInjectAsFile }: Props) {
   const [isOpen, setIsOpen]         = useState(false);
   const [sources, setSources]       = useState<DataSource[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -54,6 +55,7 @@ export default function DataSourcesSidebar({ onInject }: Props) {
   const [sheetError, setSheetError] = useState('');
   const [sheetLoading, setSheetLoading] = useState(false);
   const [injectedId, setInjectedId] = useState<string | null>(null);
+  const [fileInjectedId, setFileInjectedId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -76,7 +78,6 @@ export default function DataSourcesSidebar({ onInject }: Props) {
         },
       ]);
     };
-    // read as text for everything (binary will produce garbled chars, acceptable for stdin)
     reader.readAsText(file);
   }, []);
 
@@ -123,11 +124,18 @@ export default function DataSourcesSidebar({ onInject }: Props) {
     }
   };
 
-  /* ── inject ── */
+  /* ── inject as stdin ── */
   const inject = (src: DataSource) => {
     onInject(src.content);
     setInjectedId(src.id);
     setTimeout(() => setInjectedId(null), 2000);
+  };
+
+  /* ── inject as virtual file ── */
+  const injectAsFile = (src: DataSource) => {
+    onInjectAsFile(src.content, src.name);
+    setFileInjectedId(src.id);
+    setTimeout(() => setFileInjectedId(null), 2000);
   };
 
   const remove = (id: string) => setSources(prev => prev.filter(s => s.id !== id));
@@ -204,8 +212,10 @@ export default function DataSourcesSidebar({ onInject }: Props) {
                     key={src.id}
                     src={src}
                     onInject={() => inject(src)}
+                    onInjectAsFile={() => injectAsFile(src)}
                     onRemove={() => remove(src.id)}
                     injected={injectedId === src.id}
+                    fileInjected={fileInjectedId === src.id}
                   />
                 ))}
               </section>
@@ -254,8 +264,10 @@ export default function DataSourcesSidebar({ onInject }: Props) {
                     key={src.id}
                     src={src}
                     onInject={() => inject(src)}
+                    onInjectAsFile={() => injectAsFile(src)}
                     onRemove={() => remove(src.id)}
                     injected={injectedId === src.id}
+                    fileInjected={fileInjectedId === src.id}
                   />
                 ))}
               </section>
@@ -300,12 +312,14 @@ export default function DataSourcesSidebar({ onInject }: Props) {
 
 /* ─────────────────────────── SourceCard subcomponent ── */
 function SourceCard({
-  src, onInject, onRemove, injected,
+  src, onInject, onInjectAsFile, onRemove, injected, fileInjected,
 }: {
   src: DataSource;
   onInject: () => void;
+  onInjectAsFile: () => void;
   onRemove: () => void;
   injected: boolean;
+  fileInjected: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -341,23 +355,46 @@ function SourceCard({
         </pre>
       )}
 
-      {/* Inject button */}
-      <button
-        onClick={onInject}
-        className={`
-          w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-bold uppercase tracking-wider
-          transition-all duration-300 border-t border-outline-variant/30
-          ${injected
-            ? 'bg-secondary/15 text-secondary'
-            : 'hover:bg-primary/10 text-primary'
+      {/* Two inject buttons */}
+      <div className="flex border-t border-outline-variant/30">
+        {/* Stdin button */}
+        <button
+          onClick={onInject}
+          title="Inject file content into active cell's stdin"
+          className={`
+            flex-1 flex items-center justify-center gap-1 py-1.5 text-[9px] font-bold uppercase tracking-wider
+            transition-all duration-300 border-r border-outline-variant/20
+            ${injected
+              ? 'bg-secondary/15 text-secondary'
+              : 'hover:bg-primary/10 text-primary'
+            }
+          `}
+        >
+          {injected
+            ? <><CheckCircle2 size={10} /> Stdin ✓</>
+            : <><ArrowRightCircle size={10} /> → Stdin</>
           }
-        `}
-      >
-        {injected
-          ? <><CheckCircle2 size={11} /> Injected into stdin!</>
-          : <><ArrowRightCircle size={11} /> Inject into active cell</>
-        }
-      </button>
+        </button>
+
+        {/* As File button */}
+        <button
+          onClick={onInjectAsFile}
+          title="Inject as open()-able virtual file in the active cell"
+          className={`
+            flex-1 flex items-center justify-center gap-1 py-1.5 text-[9px] font-bold uppercase tracking-wider
+            transition-all duration-300
+            ${fileInjected
+              ? 'bg-tertiary/15 text-tertiary'
+              : 'hover:bg-secondary/10 text-secondary'
+            }
+          `}
+        >
+          {fileInjected
+            ? <><CheckCircle2 size={10} /> File ✓</>
+            : <><FolderOpen size={10} /> → open()</>
+          }
+        </button>
+      </div>
     </div>
   );
 }

@@ -119,6 +119,7 @@ interface CodeCellProps {
   initialLanguage?: string;
   initialStdin?: string;
   injectedStdin?: string;
+  injectedCode?: string;
   onDelete?: () => void;
   onCodeChange?: (code: string) => void;
   onLanguageChange?: (language: string) => void;
@@ -138,6 +139,7 @@ interface CodeCellProps {
 export default function CodeCell({
   id, initialCode = '', initialLanguage = 'python3', initialStdin = '',
   injectedStdin,
+  injectedCode,
   onDelete, onCodeChange, onLanguageChange, onStdinChange,
   onAiHelper, onExecutionComplete, onFocus, runAllTrigger,
   onDragStart, onDragEnd, onDragOver, onDrop, isDragOver
@@ -191,6 +193,25 @@ export default function CodeCell({
     if (runAllTrigger !== undefined && runAllTrigger > 0) handleRun();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runAllTrigger]);
+
+  /* ── injected code (virtual file) – prepend to Monaco editor ──────*/
+  useEffect(() => {
+    if (!injectedCode) return;
+    const clean = injectedCode.split('\0tick:')[0];
+    if (!clean) return;
+    if (editorRef.current) {
+      const current = editorRef.current.getValue();
+      editorRef.current.setValue(clean + current);
+      // Move cursor to end of injected block (after the divider line)
+      const newLines = clean.split('\n').length;
+      editorRef.current.setPosition({ lineNumber: newLines + 1, column: 1 });
+      editorRef.current.focus();
+    } else {
+      // Editor not mounted yet — patch into state so defaultValue picks it up
+      setCodeContent(prev => clean + prev);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [injectedCode]);
 
   /* ── injected stdin ───────────────────────────────────────────*/
   useEffect(() => {
