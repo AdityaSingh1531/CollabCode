@@ -4,7 +4,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useTheme } from '@/components/ThemeProvider';
 import CodeCell from '@/components/CodeCell';
 import TextCell from '@/components/TextCell';
-import { Share2, Settings, UserCircle, Sun, Moon, HelpCircle, FilePlus, CheckCircle2, Activity, Zap, Bell, Trash2, X, Copy, Sparkles, AlertCircle, TrendingUp, Maximize2, Info, Play, Save } from 'lucide-react';
+import { Share2, Settings, UserCircle, Sun, Moon, HelpCircle, FilePlus, CheckCircle2, Activity, Zap, Bell, Trash2, X, Copy, Sparkles, AlertCircle, TrendingUp, Maximize2, Info, Play, Save, History } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import InsertBar from '@/components/InsertBar';
@@ -306,6 +306,43 @@ export default function CollabCodeIDE() {
   const [lastQuery, setLastQuery] = useState('');
   const [aiResponse, setAiResponse] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
+
+  // Resize and History dropdown states
+  const [aiSidebarWidth, setAiSidebarWidth] = useState(384);
+  const [showHistoryList, setShowHistoryList] = useState(false);
+  const isResizingRef = useRef(false);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizingRef.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      const newWidth = window.innerWidth - e.clientX;
+      if (newWidth >= 285 && newWidth <= 800) {
+        setAiSidebarWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (isResizingRef.current) {
+        isResizingRef.current = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
 
   // Chat History / Multi-Chat States
   interface ChatItem { id: string; title: string; cell_id: string; created_at: string; }
@@ -1112,26 +1149,52 @@ export default function CollabCodeIDE() {
               </div>
             </div>
           </div>
-
-
         </main>
 
         {/* Right-Hand AI Sidebar */}
         {isAiSidebarOpen && (
-          <aside className="w-96 flex-shrink-0 bg-surface-container-lowest border-l border-outline-variant flex flex-col z-40 transition-all animate-in slide-in-from-right duration-200">
-            <div className="flex items-center justify-between px-5 h-14 border-b border-outline-variant/60 bg-surface-container/50 backdrop-blur-md">
+          <aside 
+            style={{ width: `${aiSidebarWidth}px` }}
+            className="relative flex-shrink-0 bg-surface-container-lowest border-l border-outline-variant flex flex-col z-40 animate-in slide-in-from-right duration-200"
+          >
+            {/* Left border drag handle for resizing */}
+            <div
+              onMouseDown={handleMouseDown}
+              className="absolute top-0 bottom-0 left-0 w-1.5 cursor-col-resize hover:bg-primary/20 active:bg-primary/45 transition-colors z-50 flex items-center justify-center group"
+              title="Drag to resize"
+            >
+              <div className="w-[2px] h-10 bg-outline-variant/30 rounded-full group-hover:bg-primary/60 transition-colors" />
+            </div>
+
+            <div className="flex items-center justify-between pl-5 pr-4 h-14 border-b border-outline-variant/60 bg-surface-container/50 backdrop-blur-md shrink-0">
               <div className="flex items-center gap-2 text-primary">
                 <Sparkles size={18} />
                 <span className="font-ui-header text-[14px] font-bold tracking-tight">AI Assistant</span>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 {currentUser && (
                   <>
+                    {/* Circle History button */}
+                    <button
+                      onClick={() => setShowHistoryList(prev => !prev)}
+                      className={`w-8 h-8 rounded-full border transition-all relative group flex items-center justify-center ${
+                        showHistoryList 
+                          ? 'bg-primary/20 text-primary border-primary/40' 
+                          : 'bg-transparent text-outline hover:text-primary hover:bg-primary/10 border-transparent'
+                      }`}
+                    >
+                      <History size={16} />
+                      <span className="absolute bottom-full right-0 mb-2 hidden group-hover:block bg-surface-container-highest text-on-surface text-[10px] font-semibold px-2.5 py-1 rounded shadow-lg border border-outline-variant/40 whitespace-nowrap z-50">
+                        Previous chats
+                      </span>
+                    </button>
+
+                    {/* Circle New Chat button */}
                     <button
                       onClick={handleStartNewChat}
-                      className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors relative group"
+                      className="w-8 h-8 rounded-full border border-transparent text-primary hover:bg-primary/10 transition-colors relative group flex items-center justify-center"
                     >
-                      <FilePlus size={18} />
+                      <FilePlus size={16} />
                       <span className="absolute bottom-full right-0 mb-2 hidden group-hover:block bg-surface-container-highest text-on-surface text-[10px] font-semibold px-2.5 py-1 rounded shadow-lg border border-outline-variant/40 whitespace-nowrap z-50">
                         New Chat
                       </span>
@@ -1140,89 +1203,88 @@ export default function CollabCodeIDE() {
                 )}
                 <button 
                   onClick={closeAiSidebar}
-                  className="p-1.5 rounded-lg text-outline hover:text-on-surface hover:bg-surface-variant transition-colors"
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-variant transition-colors"
                   title="Close AI Sidebar"
                 >
-                  <X size={18} />
+                  <X size={17} />
                 </button>
               </div>
             </div>
 
-            {/* Sidebar main body */}
-            <div className="flex-1 flex flex-col min-w-0 overflow-y-auto p-5 gap-4">
-              
-              {/* Previous chats layout (only visible to authenticated users) */}
-              {currentUser && userChats.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <div className="font-ui-label text-[10px] font-bold text-outline uppercase tracking-widest flex items-center justify-between">
-                    <span>Previous Chats</span>
-                    <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[9px] font-bold">Personal Account</span>
-                  </div>
-                  <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+            {/* Dropdown for Previous Chats */}
+            {currentUser && showHistoryList && (
+              <div className="bg-surface-container-high/90 backdrop-blur border-b border-outline-variant/50 p-3.5 max-h-56 overflow-y-auto animate-in slide-in-from-top duration-200 shrink-0">
+                <div className="font-ui-label text-[10px] font-bold text-outline uppercase tracking-wider mb-2">Previous Chats</div>
+                {userChats.length === 0 ? (
+                  <div className="text-[11px] text-outline/60 italic py-2 px-1">No previous chats in this cell.</div>
+                ) : (
+                  <div className="flex flex-col gap-1">
                     {userChats.map((chat) => (
                       <button
                         key={chat.id}
-                        onClick={() => handleSelectChat(chat.id)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-medium font-ui-label transition-all shrink-0 relative group ${
+                        onClick={() => {
+                          handleSelectChat(chat.id);
+                          setShowHistoryList(false);
+                        }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-left text-[11.5px] font-medium font-ui-label transition-all truncate hover:bg-primary/10 hover:text-primary ${
                           activeChatId === chat.id
-                            ? 'bg-primary/15 text-primary border-primary/30 shadow-sm'
-                            : 'bg-surface-container border-outline-variant/50 text-on-surface-variant hover:border-outline hover:bg-surface-variant'
+                            ? 'bg-primary/15 text-primary border border-primary/20'
+                            : 'text-on-surface-variant border border-transparent'
                         }`}
                       >
-                        <Sparkles size={11} className="shrink-0" />
-                        <span className="max-w-[80px] truncate">{chat.title}</span>
-                        
-                        {/* Hover name tooltip */}
-                        <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block bg-surface-container-highest text-on-surface text-[10px] font-semibold px-2 py-1 rounded shadow-lg border border-outline-variant/40 whitespace-nowrap z-50">
-                          {chat.title}
-                        </span>
+                        <History size={12} className="shrink-0 opacity-75" />
+                        <span className="truncate">{chat.title}</span>
                       </button>
                     ))}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
+            )}
 
-              <div className="flex flex-col gap-2">
-                <div className="font-ui-label text-[10px] font-bold text-outline uppercase tracking-widest">Context</div>
-                <div className="px-3 py-2 bg-surface-container rounded-lg border border-outline-variant/30 flex items-center justify-between shadow-sm">
+            {/* Sidebar main body */}
+            <div className="flex-1 flex flex-col min-w-0 overflow-hidden p-5 gap-4">
+              
+              <div className="flex flex-col gap-1.5 shrink-0">
+                <div className="font-ui-label text-[9px] font-bold text-outline uppercase tracking-widest">Active Workspace Scope</div>
+                <div className="px-3 py-2 bg-surface-container/60 rounded-xl border border-outline-variant/30 flex items-center justify-between shadow-sm">
                   <div className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></div>
                     <span className="font-code-block text-[11px] text-on-surface-variant font-medium">Cell {activeCellIdForAi}</span>
                   </div>
-                  <span className="text-[10px] font-ui-label text-outline bg-surface-container-high px-2 py-0.5 rounded-md">Python</span>
+                  <span className="text-[9px] font-ui-label text-outline bg-surface-container-high px-2 py-0.5 rounded-md font-bold uppercase tracking-wider">Python</span>
                 </div>
               </div>
 
-              {/* Chat Thread */}
-              <div className="flex flex-col gap-6 flex-1 justify-end min-h-[200px]">
+              {/* Chat Thread container (fills the center section) */}
+              <div className="flex-1 overflow-y-auto flex flex-col gap-6 scrollbar-thin pr-1">
                 {chatMessages.length === 0 && !isAiLoading && (
-                  <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-4 opacity-70 my-auto">
-                    <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-2">
+                  <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-4 opacity-70 my-auto py-8">
+                    <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-2 shadow-inner">
                       <Sparkles size={24} />
                     </div>
-                    <h3 className="font-ui-header text-[15px] text-on-surface font-semibold">How can I help?</h3>
-                    <p className="font-ui-body text-[12px] text-on-surface-variant leading-relaxed">
-                      Ask me to explain code, find bugs, or suggest performance optimizations for the active cell.
+                    <h3 className="font-ui-header text-[14px] text-on-surface font-semibold">How can I assist you?</h3>
+                    <p className="font-ui-body text-[11.5px] text-on-surface-variant leading-relaxed">
+                      Ask me to explain this cell's code, look for bugs, or suggest optimizations.
                     </p>
                     {/* Quick Actions */}
                     <div className="flex flex-col w-full gap-2 mt-4">
                       <button 
                         onClick={() => handleAiAnalyze('Explain this code step by step')}
-                        className="flex items-center justify-between w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/40 hover:bg-primary/5 hover:border-primary/30 transition-all text-left group shadow-sm"
+                        className="flex items-center justify-between w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/45 hover:bg-primary/5 hover:border-primary/30 transition-all text-left group shadow-sm"
                       >
                         <span className="text-[12px] font-ui-label text-on-surface font-medium group-hover:text-primary transition-colors">Explain code</span>
                         <Info size={14} className="text-outline group-hover:text-primary transition-colors" />
                       </button>
                       <button 
                         onClick={() => handleAiAnalyze('Find any bugs or issues in this code')}
-                        className="flex items-center justify-between w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/40 hover:bg-error/5 hover:border-error/30 transition-all text-left group shadow-sm"
+                        className="flex items-center justify-between w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/45 hover:bg-error/5 hover:border-error/30 transition-all text-left group shadow-sm"
                       >
                         <span className="text-[12px] font-ui-label text-on-surface font-medium group-hover:text-error transition-colors">Check for bugs</span>
                         <AlertCircle size={14} className="text-outline group-hover:text-error transition-colors" />
                       </button>
                       <button 
                         onClick={() => handleAiAnalyze('Suggest ways to optimize this code')}
-                        className="flex items-center justify-between w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/40 hover:bg-secondary/5 hover:border-secondary/30 transition-all text-left group shadow-sm"
+                        className="flex items-center justify-between w-full px-4 py-2.5 rounded-xl bg-surface-container border border-outline-variant/45 hover:bg-secondary/5 hover:border-secondary/30 transition-all text-left group shadow-sm"
                       >
                         <span className="text-[12px] font-ui-label text-on-surface font-medium group-hover:text-secondary transition-colors">Optimize performance</span>
                         <TrendingUp size={14} className="text-outline group-hover:text-secondary transition-colors" />
@@ -1233,7 +1295,7 @@ export default function CollabCodeIDE() {
 
                 {/* Render full message thread history */}
                 {chatMessages.length > 0 && (
-                  <div className="flex flex-col gap-4 overflow-y-auto max-h-[350px] scrollbar-thin">
+                  <div className="flex flex-col gap-5 py-2">
                     {chatMessages.map((msg, index) => (
                       <div key={index} className={`flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                         {msg.role === 'assistant' && (
@@ -1244,10 +1306,10 @@ export default function CollabCodeIDE() {
                             <span className="font-ui-header text-[11px] font-semibold text-on-surface">CollabCode AI</span>
                           </div>
                         )}
-                        <div className={`px-4 py-2.5 rounded-2xl text-[12.5px] font-ui-body shadow-sm max-w-[90%] ${
+                        <div className={`px-4 py-2.5 rounded-2xl text-[12.5px] font-ui-body shadow-sm max-w-[92%] ${
                           msg.role === 'user' 
-                            ? 'bg-primary text-on-primary rounded-tr-sm' 
-                            : 'glass-panel bg-surface-container/60 border border-outline-variant/50 rounded-tl-sm text-on-surface-variant leading-relaxed prose prose-sm max-w-none prose-headings:font-ui-header prose-headings:text-on-surface prose-headings:font-semibold prose-p:my-1 prose-pre:my-2 prose-pre:bg-[#0d1117] prose-pre:border prose-pre:border-white/10 prose-pre:rounded-xl prose-pre:shadow-inner prose-pre:text-[11px] prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:font-code-block prose-code:before:content-none prose-code:after:content-none'
+                            ? 'bg-primary text-on-primary rounded-tr-sm shadow-md' 
+                            : 'glass-panel bg-surface-container/60 border border-outline-variant/50 rounded-tl-sm text-on-surface leading-relaxed prose prose-sm max-w-none prose-headings:font-ui-header prose-headings:text-on-surface prose-headings:font-semibold prose-p:my-1.5 prose-pre:my-3 prose-pre:bg-[#0d1117] prose-pre:border prose-pre:border-white/10 prose-pre:rounded-xl prose-pre:shadow-inner prose-pre:text-[11px] prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:font-code-block prose-code:before:content-none prose-code:after:content-none'
                         }`}>
                           {msg.role === 'user' ? (
                             msg.content
@@ -1263,15 +1325,15 @@ export default function CollabCodeIDE() {
                 )}
 
                 {isAiLoading && (
-                  <div className="flex items-center gap-3 p-4 bg-surface-container/30 border border-outline-variant/40 rounded-xl max-w-[90%] animate-pulse">
+                  <div className="flex items-center gap-3 p-4 bg-surface-container/30 border border-outline-variant/40 rounded-xl max-w-[90%] animate-pulse mt-2">
                     <Activity size={14} className="animate-spin text-primary" />
-                    <span className="font-ui-body text-[12px] text-on-surface-variant">Thinking...</span>
+                    <span className="font-ui-body text-[12px] text-on-surface-variant font-medium">Thinking...</span>
                   </div>
                 )}
               </div>
 
               {/* Chat Input Footer */}
-              <div className="pt-4 border-t border-outline-variant/30">
+              <div className="pt-4 border-t border-outline-variant/30 shrink-0">
                 <div className="relative group">
                   <textarea 
                     value={aiQuery}
